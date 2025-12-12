@@ -1,6 +1,6 @@
 # Cardano Cloud: Persistent Runtime Foundation for Off-Chain DSLs
 
-A serverless Haskell monad that turns smart-contract specs into verifiable, restart-proof flows.
+A serverless Haskell monad that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows.
 
 This is an stub where examples and specific cardano-cloud primitives will be included. That is
 - integration with ogmios, cardano-api, cardano-node.
