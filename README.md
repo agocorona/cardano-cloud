@@ -4,6 +4,7 @@ A serverless Haskell monad that turns smart-contract specs into verifiable, rest
 
 This is an stub where examples and specific cardano-cloud primitives will be included. That is
 - integration with ogmios, cardano-api, cardano-node.
+- Specific cardano-cloud patterns and primitives.
 
 ## Status
 - Core runtime: Working. It essentially the Transient stack with additions for persistence
