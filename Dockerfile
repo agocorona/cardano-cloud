@@ -1,5 +1,3 @@
-# compile cardano-node, cli, api, includes ogmios. To be used for development with VSCode. 'bash' set up all the haskell environment
-
 # Base Ubuntu image
 FROM ubuntu
 
@@ -44,7 +42,6 @@ substituters = https://cache.iog.io https://cache.nixos.org\n\
 trusted-public-keys = cache.iog.io-1:HPVKrDdmoQy8VHxFEkY0YtVvzGwMHgO4pY1GSwpMq7g= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJcM1QEOQJYv9j7hWc=\n\
 fallback = true\n" > /etc/nix/nix.conf
 
-# Build Cardano Node using Nix develop shell
 RUN /bin/bash -c "\
     # Detect the Nix binary path dynamically
     NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit)); \
@@ -64,15 +61,6 @@ RUN /bin/bash -c "\
     '; \
 "
 
-# Remove old binaries and create wrappers for cardano-node and cardano-cli
-RUN rm -rf /usr/local/bin && mkdir -p /usr/local/bin && \
-    printf '#!/bin/bash\nexec nix develop /root/cardano-node --command cardano-node "$@"\n' \
-    | tee /usr/local/bin/cardano-node > /dev/null && \
-    chmod +x /usr/local/bin/cardano-node && \
-    printf '#!/bin/bash\nexec nix develop /root/cardano-node --command cardano-cli "$@"\n' \
-    | tee /usr/local/bin/cardano-cli > /dev/null && \
-    chmod +x /usr/local/bin/cardano-cli
-
 # Install Ogmios (download + extract + find binary)
 ARG OGMIO_VERSION=6.14.0
 ARG OGMIO_ARCH=x86_64-linux
@@ -84,9 +72,19 @@ RUN curl -L "https://github.com/CardanoSolutions/ogmios/releases/download/v${OGM
     chmod +x /usr/local/bin/ogmios && \
     rm -rf /tmp/ogmios /tmp/ogmios.zip
 
+# Calcular rutas reales de los binarios durante el build
+RUN NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit)) && \
+    CARDANO_CLI=$(dirname $(find /nix/store -name cardano-cli -type f -print -quit)) && \
+    CARDANO_NODE=$(dirname $(find / -name cardano-node -type f -print -quit)) && \
+    echo "export NIX_BIN_DIR=$NIX_BIN_DIR"       >> /root/.bashrc && \
+    echo "export CARDANO_CLI=$CARDANO_CLI"       >> /root/.bashrc && \
+    echo "export CARDANO_NODE=$CARDANO_NODE"     >> /root/.bashrc && \
+    echo "export PATH=\$PATH:$NIX_BIN_DIR:$CARDANO_CLI:$CARDANO_NODE" \
+        >> /root/.bashrc
+
 # Create alias "bash" that enters the cardano-node devShell
 RUN printf '\n\
-alias bash="nix develop --accept-flake-config /root/cardano-node --command bash"\n' \
+alias dev="nix develop --accept-flake-config /root/cardano-node"\n' \
     >> /root/.bashrc
 
 # Keep container alive for development

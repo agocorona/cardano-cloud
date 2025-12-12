@@ -1,0 +1,29 @@
+{
+  "name": "Cardano + Nix DevShell",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+
+  "overrideCommand": false,
+
+  // Abre tu repo dentro del container
+  "workspaceFolder": "/root/cardano-node",
+
+
+  "containerUser": "root",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "arrterian.nix-env-selector",
+        "jnoortheen.nix-ide",
+        "haskell.haskell"
+      ]
+    }
+  },
+
+  "postStartCommand": ""
+}
