@@ -1,5 +1,6 @@
 {
   "name": "Cardano + Nix DevShell",
+  "image": "cardano-ubuntu-nix",
   "build": {
     "dockerfile": "../Dockerfile"
   },
