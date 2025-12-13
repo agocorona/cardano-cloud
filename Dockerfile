@@ -1,22 +1,17 @@
-# Base Ubuntu image
-FROM ubuntu
+# Base Ubuntu
+FROM ubuntu:22.04
 
-# Set UTF-8 locale environment variables (required for Haskell/GHC)
+# UTF-8 locale
 ENV LANG en_US.UTF-8
 ENV LC_ALL en_US.UTF-8
 
-# Install required packages, configure locale, and prepare /nix directory
-RUN apt-get update && apt-get install -y curl bzip2 xz-utils unzip git bash locales && \
-    # Generate UTF-8 locale
+# Dependencias básicas
+RUN apt-get update && apt-get install -y curl dos2unix xz-utils unzip git bash locales && \
     locale-gen en_US.UTF-8 && \
-    # Create /nix before installation
-    mkdir -p /nix /etc/nix && \
-    chmod a+rwx /nix
+    mkdir -p /nix /etc/nix && chmod a+rwx /nix
 
-# Create non-root user "user"
+# Usuario opcional
 RUN adduser user --home /home/user --disabled-password --gecos "" --shell /bin/bash
-
-# Switch to the unprivileged user
 USER user
 ENV USER user
 WORKDIR /home/user
@@ -28,64 +23,107 @@ RUN curl -L https://nixos.org/nix/install | sh
 USER root
 ENV USER root
 
-# Add Nix profile to PATH
-ENV PATH="/root/.nix-profile/bin:$PATH"
+# Detectar ruta real de nix y ponerla en PATH globalmente
+RUN set -eux; \
+    NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit)); \
+    echo "export PATH=\$PATH:$NIX_BIN_DIR" > /etc/profile.d/nix.sh; \
+    chmod +x /etc/profile.d/nix.sh; \
+    export PATH="$PATH:$NIX_BIN_DIR"
 
-# Clone the Cardano Node repository
+# Clonar Cardano Node
 RUN git clone https://github.com/input-output-hk/cardano-node.git /root/cardano-node
-WORKDIR /root/cardano-node
 
-# Global Nix configuration (enables flakes + no build-users-group)
+# Configuración global de Nix
 RUN printf "experimental-features = nix-command flakes\n\
 build-users-group =\n\
 substituters = https://cache.iog.io https://cache.nixos.org\n\
 trusted-public-keys = cache.iog.io-1:HPVKrDdmoQy8VHxFEkY0YtVvzGwMHgO4pY1GSwpMq7g= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJcM1QEOQJYv9j7hWc=\n\
 fallback = true\n" > /etc/nix/nix.conf
 
-RUN /bin/bash -c "\
-    # Detect the Nix binary path dynamically
-    NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit)); \
-    \
-    # Append path to .bashrc for interactive sessions
-    echo export PATH=\$PATH:$NIX_BIN_DIR >> $HOME/.bashrc; \
-    \
-    # Export path for current shell
-    export PATH=\"\$NIX_BIN_DIR:\$PATH\"; \
-    \
-    echo 'Detected Nix binary directory: $NIX_BIN_DIR'; \
-    \
-    # Build all Cardano components using cabal inside Nix devshell
-    nix develop --accept-flake-config .#devShells.x86_64-linux.default --command bash -c '\
-        cabal update && \
-        cabal build all \
-    '; \
-"
-
-# Install Ogmios (download + extract + find binary)
+# Instalar Ogmios
 ARG OGMIO_VERSION=6.14.0
 ARG OGMIO_ARCH=x86_64-linux
 RUN curl -L "https://github.com/CardanoSolutions/ogmios/releases/download/v${OGMIO_VERSION}/ogmios-v${OGMIO_VERSION}-${OGMIO_ARCH}.zip" \
     -o /tmp/ogmios.zip && \
-    mkdir -p /tmp/ogmios && \
-    unzip /tmp/ogmios.zip -d /tmp/ogmios && \
+    mkdir -p /tmp/ogmios && unzip /tmp/ogmios.zip -d /tmp/ogmios && \
     find /tmp/ogmios -type f -name ogmios -exec mv {} /usr/local/bin/ogmios \; && \
-    chmod +x /usr/local/bin/ogmios && \
-    rm -rf /tmp/ogmios /tmp/ogmios.zip
+    chmod +x /usr/local/bin/ogmios && rm -rf /tmp/ogmios /tmp/ogmios.zip
 
-# Calcular rutas reales de los binarios durante el build
-RUN NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit)) && \
-    CARDANO_CLI=$(dirname $(find /nix/store -name cardano-cli -type f -print -quit)) && \
-    CARDANO_NODE=$(dirname $(find / -name cardano-node -type f -print -quit)) && \
-    echo "export NIX_BIN_DIR=$NIX_BIN_DIR"       >> /root/.bashrc && \
-    echo "export CARDANO_CLI=$CARDANO_CLI"       >> /root/.bashrc && \
-    echo "export CARDANO_NODE=$CARDANO_NODE"     >> /root/.bashrc && \
-    echo "export PATH=\$PATH:$NIX_BIN_DIR:$CARDANO_CLI:$CARDANO_NODE" \
-        >> /root/.bashrc
+# Script build-cardano.sh (compilación diferida)
+RUN cat << 'EOF' > /usr/local/bin/build-cardano.sh
+#!/usr/bin/env bash
 
-# Create alias "bash" that enters the cardano-node devShell
-RUN printf '\n\
-alias dev="nix develop --accept-flake-config /root/cardano-node"\n' \
-    >> /root/.bashrc
+# Cargar PATH de Nix
+if [ -f /etc/profile.d/nix.sh ]; then
+  source /etc/profile.d/nix.sh
+fi
 
-# Keep container alive for development
-CMD ["sleep", "infinity"]
+
+
+if [ ! -f /root/.cardano_built ]; then
+  echo "▶ Primera compilación de Cardano Node..."
+  
+  printf "experimental-features = nix-command flakes\n\
+      build-users-group =\n\
+      substituters = https://cache.iog.io https://cache.nixos.org\n\
+      trusted-public-keys = cache.iog.io-1:HPVKrDdmoQy8VHxFEkY0YtVvzGwMHgO4pY1GSwpMq7g= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJcM1QEOQJYv9j7hWc=\n\
+      fallback = true\n" > /etc/nix/nix.conf
+
+  # Compilar cardano-node y cabal/GHC/HLS
+  nix develop --accept-flake-config  /root/cardano-node  -c bash -lc "
+    cd /root/cardano-node &&
+    cabal update &&
+    cabal build all &&
+    curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | \
+      BOOTSTRAP_HASKELL_MINIMAL=1 \
+      BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+      BOOTSTRAP_HASKELL_INSTALL_HLS=1 \
+      BOOTSTRAP_HASKELL_ADJUST_BASHRC=0 \
+      sh
+  "
+
+  # Calcular rutas finales de binarios
+  NIX_BIN_DIR=$(dirname $(find /nix/store -name nix -type f -print -quit))
+  CARDANO_CLI_DIR=$(dirname $(find /nix/store -name cardano-cli -type f -print -quit))
+  CARDANO_NODE_DIR=$(dirname $(find / -name cardano-node -type f -print -quit))
+
+  echo "export NIX_BIN_DIR=$NIX_BIN_DIR"       >> /root/.bashrc
+  echo "export CARDANO_CLI=$CARDANO_CLI_DIR"  >> /root/.bashrc
+  echo "export CARDANO_NODE=$CARDANO_NODE_DIR" >> /root/.bashrc
+  echo "export PATH=\$PATH:$NIX_BIN_DIR:$CARDANO_CLI_DIR:$CARDANO_NODE_DIR" >> /root/.bashrc
+
+  touch /root/.cardano_built
+else
+  echo "✔ Cardano Node ya compilado"
+fi
+
+exec bash
+EOF
+
+RUN dos2unix /usr/local/bin/build-cardano.sh && chmod +x /usr/local/bin/build-cardano.sh
+
+# Alias para entrar en devShell
+RUN echo 'alias dev="nix develop --accept-flake-config /root/cardano-node"' >> /root/.bashrc
+
+RUN /usr/local/bin/build-cardano.sh 
+
+RUN  HLS_BIN=$(find /nix/store -type f -name haskell-language-server -print -quit) && \
+  echo "export HLS_BIN=$HLS_BIN" > /etc/profile.d/hls.sh && \
+  chmod +x /etc/profile.d/hls.sh && \
+  GHC_BIN=$(find /nix/store -type f -name ghc -print -quit) && \
+  CABAL_BIN=$(find /nix/store -type f -name cabal -print -quit) && \
+  echo "export GHC_BIN=$GHC_BIN"     >  /etc/profile.d/haskell.sh && \
+  echo "export CABAL_BIN=$CABAL_BIN" >> /etc/profile.d/haskell.sh && \
+  echo 'export PATH=$PATH:$(dirname $GHC_BIN):$(dirname $CABAL_BIN)' \
+     >> /etc/profile.d/haskell.sh && \
+  chmod +x /etc/profile.d/haskell.sh && \
+  ln -sf "$GHC_BIN"   /usr/local/bin/ghc && \
+  ln -sf "$CABAL_BIN" /usr/local/bin/cabal
+
+
+
+# CMD final: arranca build al primer inicio y entra en bash con devShell
+# CMD ["/bin/bash", "-lc", "/usr/local/bin/build-cardano.sh"]
+
+CMD ["/bin/bash"]
+
