@@ -1,10 +1,10 @@
 {
   "name": "Cardano Node + Nix Dev",
-  "image" : "cardano-ubuntu-nix1",
+  // "image" : "cardano-ubuntu-nix1",
 
-  // "build": {
-    // "dockerfile": "../Dockerfile"
-  // },
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
   "remoteUser": "root",
   "settings": {
     "terminal.integrated.shell.linux": "/bin/bash",
