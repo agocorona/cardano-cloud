@@ -1142,3 +1142,72 @@ distrbutedVotation= do
                       checkpoint       -- store and forward when communication ready
                       return results 
         return $ flatten aggregated
+
+```haskell
+setRState $ CurrentCollateral 0
+loanAmount <- minput "/getLoan"   "enter loan amount"
+
+checkpoint
+
+requiredCollateral <- local $ loanAmount * baseRatio * (1 + volatilityFactor) -- strean
+CurrentCollateral currentCollateral <- getRState
+let shortFall= requiredCollateral - currentCollateral
+if shortFall > 0 then do
+   coll <- collect 0 time $ do
+          minput "/enterCollateral"  Collateral{explanation,amount= shortFall}
+   if sum coll < shortFall 
+    then if currentCollateral==0 moutput "not allowed" else liquidation currentCollateral
+    else do
+      w <- getWallet
+      payTo w (-shortFall)
+      setRState $ CurrentCollateral requiredCollateral
+
+volatilityFactor= waitEvents $ poll oracle for volatility calculations 
+```
+
+```haskell
+dynamicCollateralLending = do
+    -- Estado inicial
+    setRState CurrentCollateral 0
+
+    -- 1. Borrower solicita préstamo
+    loanAmount <- minput "/getLoan" "Enter desired loan amount in ADA"
+    
+    -- 2. Fórmula reactiva: requiredCollateral cambia automáticamente con la volatilidad
+    baseRatio <- return 1.5
+
+    checkpoint   -- will restart execution on failure
+
+    requiredCollateral <- local $ loanAmount * baseRatio * (1 + volatilityFactor)
+      -- volatilityFactor es un stream continuo del oráculo
+      -- → requiredCollateral se recalcula en tiempo real sin bucle explícito
+
+    -- 3. Cálculo reactivo del shortfall
+    currentCollateral <- getRState CurrentCollateral
+    let shortfall = requiredCollateral - currentCollateral
+
+    -- 4. Si hay shortfall → pide colateral automáticamente
+    when (shortfall > 0) $ do
+        deposited <- collect 0 duration $ do
+            payload <- minput "/depositCollateral" CollateralData{message,amount=shortfall}
+            return payload.amount
+
+        let totalDeposited = sum deposited
+        setRState CurrentCollateral (currentCollateral + totalDeposited)
+
+        -- Si aún no alcanza → el stream de requiredCollateral sigue activo
+        -- y el próximo cambio de volatilidad puede generar nuevo shortfall
+
+    -- 5. Si se concede el préstamo (ej. tras depósito suficiente)
+    when (currentCollateral >= requiredCollateral) $ do
+        payTo borrower loanAmount
+        moutput "Loan granted and active"
+
+
+
+  where
+    -- Stream continuo de volatilidad (tu magia reactiva)
+    volatilityFactor = waitEvents $ poll oracleVolatility
+
+        
+```
