@@ -3,14 +3,17 @@
 A serverless Haskell monad that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows.
 
 This is an stub where examples and specific cardano-cloud primitives will be included. That is
-- integration with ogmios, cardano-api, cardano-node.
+- integration with cardano-api, cardano-node.
 - Specific cardano-cloud patterns and primitives.
+
+The code for general use is being integrated in transient.
 
 ## Status
 - Core runtime: Working. It essentially the Transient stack with additions for persistence
     - like persistent collect https://x.com/AGoCorona/status/1993762316358209733?s=20
     - The transient stack: https://github.dev/transient-haskell/transient-stack
-- Most of the work carried out now is devoted to develop and tune the persistence primitives
+      
+- Current work is focused on developing and tuning the persistence primitives in Transient
     - To preserve non serializable state across shutdowns and restarts. Done
     - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms
     - Specially when the state includes non serializable things like backtracking handlers
