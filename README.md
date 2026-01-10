@@ -1,6 +1,6 @@
 # Cardano Cloud: Persistent Runtime Foundation for Off-Chain DSLs
 
-A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesaary for the execution.
+A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesary for the execution.
 
 This is where examples and specific cardano-cloud primitives will be included. That is
 - integration with cardano-api, cardano-node.  (Api.hs)
@@ -52,3 +52,4 @@ defiAuction = do
   bids <- collect 100 3600000000 $ minput "/bid" minPayload
   winner <- selectWinner bids
   liftCTL $ pay winner (amount winner * 1_000_000)
+
