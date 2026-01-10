@@ -1,19 +1,16 @@
 # Cardano Cloud: Persistent Runtime Foundation for Off-Chain DSLs
 
-A serverless Haskell monad that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows.
+A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesaary for the execution.
 
-This is an stub where examples and specific cardano-cloud primitives will be included. That is
-- integration with cardano-api, cardano-node.
-- Specific cardano-cloud patterns and primitives.
-
-The code for general use is being integrated in transient.
+This is where examples and specific cardano-cloud primitives will be included. That is
+- integration with cardano-api, cardano-node.  (Apu.hs)
+- Specific cardano-cloud patterns and primitives. (SF.hs)
 
 ## Status
 - Core runtime: Working. It essentially the Transient stack with additions for persistence
     - like persistent collect https://x.com/AGoCorona/status/1993762316358209733?s=20
     - The transient stack: https://github.dev/transient-haskell/transient-stack
-      
-- Current work is focused on developing and tuning the persistence primitives in Transient
+- Most of the work carried out now is devoted to develop and tune the persistence primitives
     - To preserve non serializable state across shutdowns and restarts. Done
     - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms
     - Specially when the state includes non serializable things like backtracking handlers
