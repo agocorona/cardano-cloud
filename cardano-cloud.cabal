@@ -1,0 +1,36 @@
+name:                cardano-cloud
+version:             0.1.0.0
+-- synopsis:
+-- description:
+homepage:            https://github.com/gemini/cardano-cloud#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Author name here
+maintainer:          example@example.com
+copyright:           2024 Author name here
+category:            Web
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     CardanoC.SF
+                       CardanoC.Api
+                       
+  build-depends:       base >= 4.7 && < 5
+                     , containers
+                     , mtl
+                     , transient
+                     , transient-universe
+                     , cardano-api == 10.19.1.0
+                    --  , cardano-slotting
+                    --  , cardano-ledger-core
+                    --  , ‘ouroboros-consensus-cardano
+                    --  , cardano-ledger-conway
+                    --  , cardano-ledger-shelley
+                     , text
+                     , syb
+                     , base16-bytestring
+                     , bytestring
+                     
+  default-language:    Haskell2010
