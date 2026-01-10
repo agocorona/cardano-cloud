@@ -29,7 +29,7 @@ import Cardano.Api
 import Cardano.Api.HasTypeProxy (AsType(..))
 import Cardano.Api.Ledger(PParams)
 import Cardano.Api.Query  -- (QueryEraHistory(..))
-
+import Cardano.Api (Lovelace(..))
 
 
 
@@ -137,7 +137,7 @@ currentSlot = do
 waitUntil :: SlotNo -> Cloud ()
 waitUntil targetSlot = local $ do
   env <- ask
-  lifttIO $ waitUntilIO env targetSlot
+  liftIO $ waitUntilIO env targetSlot
 
 waitUntilIO :: CloudEnv -> SlotNo -> IO ()
 waitUntilIO env targetSlot= do
@@ -182,7 +182,7 @@ getUTxOsAtIO env addr = do
     Right (Left e)   -> error $ "Acquire failed: " ++ show e
     Right (Right utxo)       -> return utxo
 
--- Builds and balances, but does NOT sign or send
+
 
 buildAndBalanceTxIO :: CloudEnv -> TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
 buildAndBalanceTxIO env bodyContent = do
@@ -232,17 +232,26 @@ buildAndBalanceTxIO env bodyContent = do
          balancedEither
 
 
-signTxServerIO :: CloudEnv -> TxBody ConwayEra -> IO (Tx ConwayEra)
-signTxServerIO env body =  do
-  let skey = envSigningKey env
+-- | Firma una transacción balanceada (BalancedTxBody) usando la signing key del entorno.
+--   Extrae el TxBody real del BalancedTxBody para poder firmarlo.
+signTxServerIO :: CloudEnv -> BalancedTxBody ConwayEra -> IO (Tx ConwayEra)
+signTxServerIO env balancedTxBody = do
+  let skey = envSigningKey env  -- Asumimos PaymentSigningKey o similar
 
-  let shelleyBasedEra = ShelleyBasedEraConway
+  -- Extraer el TxBody real ya balanceado (este es el que se firma)
+  let body = case balancedTxBody of
+               BalancedTxBody _content txBody _change _fee -> txBody
+               -- O si tu versión usa nombres de campos diferentes, ajusta el pattern match
 
-      -- We create the witness using the correct function for Shelley-based eras
-      witness = makeShelleyKeyWitness shelleyBasedEra body (WitnessPaymentExtendedKey skey)
+  -- Crear el witness de clave usando la función que ya tienes y compila
+  let shelleyEra = ShelleyBasedEraConway
 
-      -- We build the signed transaction
-  return $ makeSignedTransaction [witness] body
+      witness :: KeyWitness ConwayEra
+      witness = makeShelleyKeyWitness shelleyEra body (WitnessPaymentExtendedKey skey)
+        -- O WitnessPaymentKey skey si no es extended key
+
+  -- Construir la Tx firmada
+  pure $ makeSignedTransaction [witness] body
 
 
 
@@ -269,16 +278,16 @@ instance (Read a, Show a,SerialiseAsCBOR a) => Loggable (CBORData a) where
 
 
 -- | signs with the private key envSingningKey
-signTxBrowser :: TxBodyContent BuildTx ConwayEra 
-              -> Cloud (Tx ConwayEra)
-signTxBrowser bodyContent = onAll $ do
+signTxBrowser ::  BalancedTxBody ConwayEra
+              -> TransIO (Tx ConwayEra)
+signTxBrowser balanced = do
   -- 1. We build and balance, we get the TxBody
   (cborHex, txBody) <-  do
     env <- ask
     liftIO $ do
-      balanced@(BalancedTxBody _txContent txBody _change _fee)  <- buildAndBalanceTxIO env bodyContent
-      let unsignedTx = makeSignedTransaction [] txBody
-      let cborBytes = serialiseToCBOR unsignedTx   -- we serialize the balancedTxBody directly
+      let (BalancedTxBody _txContent txBody _change _fee)  = balanced 
+          unsignedTx = makeSignedTransaction [] txBody
+          cborBytes = serialiseToCBOR unsignedTx   -- we serialize the balancedTxBody directly
           cborHex = TE.decodeUtf8 $ B16.encode cborBytes
       return (cborHex, txBody)
 
@@ -306,30 +315,78 @@ signTxBrowser bodyContent = onAll $ do
 
 
 
-{-
+instance Loggable TxId
+
+
 submitSignedTx :: Tx ConwayEra -> Cloud TxId
-submitSignedTx signedTx = do
-  conn <- asks envConn
-  result <- liftIO $ submitTxToNodeLocal conn (TxInMode signedTx ConwayEraInCardanoMode)
+submitSignedTx signedTx = local $ do
+  env <-  ask 
+  liftIO $ submitSignedTxIO env signedTx
+
+-- | Submits a signed transaction to the local Cardano node
+--   and returns the transaction ID upon success.
+submitSignedTxIO :: CloudEnv -> Tx ConwayEra -> IO TxId
+submitSignedTxIO env signedTx = do
+  let conn = envConn env  -- Assume this is LocalNodeConnectInfo CardanoMode
+
+  -- Submit using the correct TxInMode wrapper for Conway
+  result <- submitTxToNodeLocal
+              conn
+              (TxInMode (shelleyBasedEra :: ShelleyBasedEra ConwayEra) signedTx)
+
   case result of
-    SubmitSuccess     -> return $ getTxId (txBody signedTx)
+    SubmitSuccess -> pure $ getTxId (getTxBody signedTx)
     SubmitFail reason -> error $ "Submit failed: " ++ show reason
 
 buildAndSubmitTx :: TxBodyContent BuildTx ConwayEra -> Cloud TxId
-buildAndSubmitTx content = do
-  body   <- buildAndBalanceTx content
-  signed <- signTx body
-  submitSignedTx signed
+buildAndSubmitTx content = local $ do
+  env <- ask
+  body   <-  liftIO $ buildAndBalanceTxIO env content
+  signed <- signTxBrowser body
+  liftIO $ submitSignedTxIO env signed
+
+
+
+-- -- | Default / minimal TxBodyContent in BuildTx mode for ConwayEra (compatible con 10.19.1.0).
+-- --   Use as base and override fields as needed.
+-- --   - txIns will be auto-filled by buildAndSubmitTx / auto-balance
+-- --   - Fee starts explicit at 0 (recalculated later)
+-- defaultTxBodyContent :: TxBodyContent BuildTx ConwayEra
+-- defaultTxBodyContent = TxBodyContent
+--   { txIns                = []                          -- Auto-filled later
+--   , txInsCollateral      = TxInsCollateralNone
+--   , txInsReference       = TxInsReferenceNone
+--   , txOuts               = []                          -- Override for payments
+--   , txTotalCollateral    = TxTotalCollateralNone
+--   , txReturnCollateral   = TxReturnCollateralNone
+--   , txFee                = TxFeeExplicit (lovelaceFromInteger 0)
+--   , txValidityLowerBound = TxValidityNoLowerBound
+--   , txValidityUpperBound = TxValidityNoUpperBound      -- Correct constructor
+--   , txMetadata           = TxMetadataNone
+--   , txAuxScripts         = TxAuxScriptsNone
+--   , txExtraKeyWits       = TxExtraKeyWitnessesNone     -- Renamed field
+--   , txProtocolParams     = BuildTxWith Nothing         -- Auto-injected
+--   , txWithdrawals        = TxWithdrawalsNone
+--   , txCertificates       = TxCertificatesNone
+--   , txUpdateProposal     = TxUpdateProposalNone
+--   , txMintValue          = TxMintValue mempty (BuildTxWith Map.empty)  -- No minting
+--   , txScriptValidity     = TxScriptValidity Nothing                    -- Safe default
+--   , txProposalProcedures = Nothing                     -- Conway governance
+--   , txVotingProcedures   = Nothing                     -- Conway votes
+--   , txCurrentTreasuryValue = Nothing                   -- Conway treasury
+--   }
+
 
 -- 2. pay: Sends ADA to any address
 pay :: AddressInEra ConwayEra -> Lovelace -> Cloud TxId
 pay targetAddr amount =
   buildAndSubmitTx $
-    emptyTxBodyContent
+    let bodyContent = defaultTxBodyContent shelleyBasedEra
+    in bodyContent 
       { txOuts =
           [ TxOut
               targetAddr
-              (lovelaceToTxOutValue amount)
+              (lovelaceToTxOutValue shelleyBasedEra amount)
               TxOutDatumNone
               ReferenceScriptNone
           ]
@@ -339,16 +396,14 @@ pay targetAddr amount =
 lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud TxId
 lock scriptAddr amount datum =
   buildAndSubmitTx $
-    emptyTxBodyContent
+    let content= defaultTxBodyContent shelleyBasedEra 
+    in content
       { txOuts =
           [ TxOut
-              scriptAddr
-              (lovelaceToTxOutValue amount)
-              (TxOutDatumInline era datum)
-              ReferenceScriptNone
+                scriptAddr (lovelaceToTxOutValue shelleyBasedEra amount)
+                (TxOutDatumInline era (unsafeHashableScriptData datum)) ReferenceScriptNone
           ]
       }
   where
     era = BabbageEraOnwardsConway
 
--}
