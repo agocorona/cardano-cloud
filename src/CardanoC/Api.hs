@@ -24,6 +24,7 @@ import Cardano.Api.Query  -- (QueryEraHistory(..))
 import Transient.Base
 import Transient.Move
 import Transient.Move.Web
+import Transient.Move.Job
 import Transient.Parse
 
 
@@ -139,7 +140,13 @@ waitUntil targetSlot = local $ do
 
 -- Alternative: wait for a duration in seconds (more user-friendly)
 waitSeconds :: Int -> Cloud ()
-waitSeconds secs = localIO $ threadDelay (secs * 1_000_000)
+waitSeconds secs =  do
+  tinit <- local $ fromIntegral <$> getMicroSeconds
+  tnow  <- onAll $ fromIntegral <$> getMicroSeconds
+  let tfin= tinit + secs * 1_000_000
+
+  let tleft= tfin - tnow
+  onAll $ liftIO $ when (tleft > 0) $ threadDelay tleft
 
 
 -- 5. getUTxOsAt → Uses queryNodeLocalState with the existing connection
