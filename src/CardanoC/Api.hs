@@ -49,7 +49,7 @@ data CloudEnv = CloudEnv
   { envConn       :: LocalNodeConnectInfo
   , envSigningKey :: SigningKey PaymentExtendedKey
   , envOwnAddress :: AddressInEra ConwayEra
-  , envPParams    :: PParams (ShelleyLedgerEra ConwayEra)  -- Cambio clave aquí
+  , envPParams    :: PParams (ShelleyLedgerEra ConwayEra)  -- Key change here
   , envNetworkId  :: NetworkId
   , envEra        :: AnyCardanoEra
   }
@@ -60,37 +60,37 @@ initCloudEnv
   -> FilePath
   -> IO CloudEnv
 initCloudEnv socketPath networkId skeyPath = do
-  -- Cargar signing key
+  -- Load signing key
   eSKey <- readFileTextEnvelope  (File skeyPath)
   skey <- case eSKey of
-    Left err  -> error $ "Error leyendo skey: " ++ show err
+    Left err  -> error $ "Error reading skey: " ++ show err
     Right k   -> return k
 
-  -- Derivar own address
+  -- Derive own address
   let vkey = castVerificationKey (getVerificationKey skey) :: VerificationKey PaymentKey
       pkh  = verificationKeyHash vkey
       ownAddr = makeShelleyAddressInEra ShelleyBasedEraConway networkId
                   (PaymentCredentialByKey pkh)
                   NoStakeAddress
 
-  -- Conexión local
+  -- Local connection
   let conn = LocalNodeConnectInfo
                { localConsensusModeParams = CardanoModeParams (EpochSlots 21600)
                , localNodeNetworkId       = networkId
                , localNodeSocketPath      = File socketPath
                }
 
-  -- Query PParams (forma actual en Conway)
+  -- Query PParams (current way in Conway)
   eResult <- runExceptT $ queryNodeLocalState conn VolatileTip
                         (QueryInEra (QueryInShelleyBasedEra ShelleyBasedEraConway QueryProtocolParameters))
 
   pparams <- case eResult of
-               Left acquiringErr -> error $ "Fallo adquiriendo conexión al nodo: " ++ show acquiringErr
-               Right (Left eraMismatch) -> error $ "Mismatch de era en query de PParams: " ++ show eraMismatch
-               Right (Right pp) -> return pp  -- pp :: PParams ConwayEra (del ledger, coincide con tu envPParams)
+               Left acquiringErr -> error $ "Failed to acquire connection to the node: " ++ show acquiringErr
+               Right (Left eraMismatch) -> error $ "Era mismatch in PParams query: " ++ show eraMismatch
+               Right (Right pp) -> return pp  -- pp :: PParams ConwayEra (from ledger, matches your envPParams)
   let currentEra = AnyCardanoEra ConwayEra
 
-  putStrLn "CloudEnv inicializado correctamente!"
+  putStrLn "CloudEnv initialized correctly!"
   putStrLn $ "Network: " ++ show networkId
   putStrLn $ "Own address: " ++ show(serialiseAddress ownAddr)
   putStrLn $ "Socket: " ++ socketPath
@@ -108,10 +108,10 @@ initCloudEnv socketPath networkId skeyPath = do
 ask= getState <|> error ("cardano cloud: no state") :: TransIO CloudEnv
 
 -- ===========================================================================
--- Primitivas clave usando la conexión reutilizada
+-- Key primitives using the reused connection
 -- ===========================================================================
 
--- 6. currentSlot → Usa directamente getLocalChainTip con envConn
+-- 6. currentSlot → Directly uses getLocalChainTip with envConn
 currentSlot :: TransIO SlotNo
 currentSlot = do
   env <- ask
@@ -120,7 +120,7 @@ currentSlot = do
     ChainTipAtGenesis -> SlotNo 0
     ChainTip slotNo _hash _blockNo -> slotNo
 
--- 4. waitUntil → Polling eficiente usando la misma conexión
+-- 4. waitUntil → Efficient polling using the same connection
 waitUntil :: SlotNo -> Cloud ()
 waitUntil targetSlot = local $ do
   env <- ask
@@ -133,16 +133,16 @@ waitUntil targetSlot = local $ do
         if current >= targetSlot
           then return ()
           else do
-            liftIO $ threadDelay 1_000_000 -- 1 segundo (ajustable)
+            liftIO $ threadDelay 1_000_000 -- 1 second (adjustable)
             loop
   void loop
 
--- Alternativa: wait por duración en segundos (más amigable)
+-- Alternative: wait for a duration in seconds (more user-friendly)
 waitSeconds :: Int -> Cloud ()
 waitSeconds secs = localIO $ threadDelay (secs * 1_000_000)
 
 
--- 5. getUTxOsAt → Usa queryNodeLocalState con la conexión existente
+-- 5. getUTxOsAt → Uses queryNodeLocalState with the existing connection
 getUTxOsAtIO :: CloudEnv -> AddressInEra ConwayEra -> IO (UTxO ConwayEra)
 getUTxOsAtIO env addr = do
   let conn = envConn env
@@ -150,7 +150,7 @@ getUTxOsAtIO env addr = do
                   Nothing   -> error "Invalid address conversion"
                   Just any  -> any
       -- query :: QueryInMode CardanoMode (Either LedgerQueryFailure (UTxO ConwayEra))
-      query = QueryInEra $ QueryInShelleyBasedEra ShelleyBasedEraConway
+      query = QueryInEra $ QueryInShelleyBasedEra ShelleyBasedEraConway -- EraInMode ConwayEra CardanoMode
                      (QueryUTxO (QueryUTxOByAddress (Set.singleton addrAny)))
 
   result <- liftIO $ runExceptT  $ queryNodeLocalState conn VolatileTip  query
@@ -159,7 +159,7 @@ getUTxOsAtIO env addr = do
     Right (Left e)   -> error $ "Acquire failed: " ++ show e
     Right (Right utxo)       -> return utxo
 
--- Construye y balancea, pero NO firma ni envía
+-- Builds and balances, but does NOT sign or send
 
 buildAndBalanceTxIO :: CloudEnv -> TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
 buildAndBalanceTxIO env bodyContent = do
@@ -187,7 +187,7 @@ buildAndBalanceTxIO env bodyContent = do
       depositReturns :: Map.Map StakeCredential Coin
       depositReturns = Map.empty
 
-      -- Parámetro para retornos de depósitos DRep (vacío si no deregistras DReps)
+      -- Parameter for DRep deposit returns (empty if you don't unregister DReps)
       drepReturns :: Map.Map a Coin
       drepReturns = Map.empty
 
@@ -198,13 +198,13 @@ buildAndBalanceTxIO env bodyContent = do
                       ledgerPParams
                       stakePools
                       depositReturns
-                      drepReturns  -- ← Aquí va el "undefined" tipado como Map.empty
+                      drepReturns  -- ← Here goes the "undefined" typed as Map.empty
                       utxo
                       bodyContent
 
       balancedEither = autoBalance ownAddr Nothing
 
-  either (\err -> error $ "Error al balancear tx: " ++ show err)
+  either (\err -> error $ "Error balancing tx: " ++ show err)
          return
          balancedEither
 
@@ -215,10 +215,10 @@ signTxServerIO env body =  do
 
   let shelleyBasedEra = ShelleyBasedEraConway
 
-      -- Creamos el witness usando la función correcta para eras Shelley-based
+      -- We create the witness using the correct function for Shelley-based eras
       witness = makeShelleyKeyWitness shelleyBasedEra body (WitnessPaymentExtendedKey skey)
 
-      -- Construimos la transacción firmada
+      -- We build the signed transaction
   return $ makeSignedTransaction [witness] body
 
 
@@ -239,43 +239,43 @@ instance (Read a, Show a,SerialiseAsCBOR a) => Loggable (CBORData a) where
      r = do
       either <-  deserialiseFromCBOR (asType :: AsType  a)  <$> BS.toStrict <$> tTakeWhile' (/= '\xFF')
       case either of
-            Left err -> error $ "Error deserializando  " ++ show (typeOf (undefined :: a)) ++ "" ++show err
+            Left err -> error $ "Error deserializing  " ++ show (typeOf (undefined :: a)) ++ "" ++show err
             Right x -> return $ CBORData x
 
--- Primitiva: firma en navegador (un solo paso) y devuelve la tx firmada completa
+-- Primitive: sign in browser (one step) and return the complete signed tx
 
 
--- | firma con la clave privada envSingningKey 
+-- | signs with the private key envSingningKey
 signTxBrowser :: TxBodyContent BuildTx ConwayEra 
               -> Cloud (Tx ConwayEra)
 signTxBrowser bodyContent = onAll $ do
-  -- 1. Construimos y balanceamos, obtenemos el TxBody
+  -- 1. We build and balance, we get the TxBody
   (cborHex, txBody) <-  do
     env <- ask
     liftIO $ do
       balanced@(BalancedTxBody _txContent txBody _change _fee)  <- buildAndBalanceTxIO env bodyContent
       let unsignedTx = makeSignedTransaction [] txBody
-      let cborBytes = serialiseToCBOR unsignedTx   -- serializamos directamente el balancedTxBody
+      let cborBytes = serialiseToCBOR unsignedTx   -- we serialize the balancedTxBody directly
           cborHex = TE.decodeUtf8 $ B16.encode cborBytes
       return (cborHex, txBody)
 
-  -- 2. Un solo paso: enviamos el unsigned y recibimos el witnessesHex limpio
+  -- 2. One step: we send the unsigned and receive the clean witnessesHex
   POSTData witnessesHex <- unCloud $ minput "sign" $ UnsignedTx { cborHex = cborHex }
 
-  -- 3. Deserializamos el witness recibido del browser (el wallet ya lo firmó)
+  -- 3. We deserialize the witness received from the browser (the wallet already signed it)
   do
     let witnessBytes = case B16.decode $ TE.encodeUtf8 witnessesHex of
-          Left err   -> error $ "Hex inválido en witnesses: " ++ err
+          Left err   -> error $ "Invalid hex in witnesses: " ++ err
           Right bytes -> bytes
 
         witness :: KeyWitness ConwayEra
         witness =
           case deserialiseFromCBOR (asType :: AsType (KeyWitness ConwayEra)) witnessBytes of
-            Left err -> error $ "Error deserializando witness: " ++ show err
+            Left err -> error $ "Error deserializing witness: " ++ show err
             Right ws -> ws
 
 
-  -- 4. Añadimos el witness del usuario al body (igual que en server-side)
+  -- 4. We add the user's witness to the body (same as on server-side)
     return $ makeSignedTransaction [witness] txBody
 
 
@@ -298,7 +298,7 @@ buildAndSubmitTx content = do
   signed <- signTx body
   submitSignedTx signed
 
--- 2. pay: Envía ADA a cualquier dirección
+-- 2. pay: Sends ADA to any address
 pay :: AddressInEra ConwayEra -> Lovelace -> Cloud TxId
 pay targetAddr amount =
   buildAndSubmitTx $
@@ -312,7 +312,7 @@ pay targetAddr amount =
           ]
       }
 
--- 1. lock: Bloquea fondos en un script con datum inline
+-- 1. lock: Locks funds in a script with inline datum
 lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud TxId
 lock scriptAddr amount datum =
   buildAndSubmitTx $
