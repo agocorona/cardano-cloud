@@ -3,7 +3,7 @@
 A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesaary for the execution.
 
 This is where examples and specific cardano-cloud primitives will be included. That is
-- integration with cardano-api, cardano-node.  (Apu.hs)
+- integration with cardano-api, cardano-node.  (Api.hs)
 - Specific cardano-cloud patterns and primitives. (SF.hs)
 
 ## Status
