@@ -11,6 +11,18 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
+{-|
+Basic primitives for the creation of serverless, distributed, durable smart contracts
+All the primitives in the Cloud monad share the properties of durability etc.
+This module contains only the primitives that interface with Cardano Api
+The goal is also to create an stable API, to free the DApp developer from the complexity 
+and rapid changes of cardano Api.
+TODO: separate the IO primitives from the Cloud primitives.
+TODO: identiry conditions of backtracking and implement them.
+TODO: Testing
+
+}
+
 module CardanoC.Api where
 
 import Cardano.Api
@@ -125,6 +137,10 @@ currentSlot = do
 waitUntil :: SlotNo -> Cloud ()
 waitUntil targetSlot = local $ do
   env <- ask
+  lifttIO $ waitUntilIO env targetSlot
+
+waitUntilIO :: CloudEnv -> SlotNo -> IO ()
+waitUntilIO env targetSlot= do
   let conn = envConn env
       loop = do
         tip <- getLocalChainTip conn
@@ -138,7 +154,7 @@ waitUntil targetSlot = local $ do
             loop
   void loop
 
--- Alternative: wait for a duration in seconds (more user-friendly)
+-- | Wait for a duration in seconds
 waitSeconds :: Int -> Cloud ()
 waitSeconds secs =  do
   tinit <- local $ fromIntegral <$> getMicroSeconds
