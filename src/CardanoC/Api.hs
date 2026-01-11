@@ -74,7 +74,9 @@ initCloudEnv
   -> IO CloudEnv
 initCloudEnv socketPath networkId skeyPath = do
   -- Load signing key
-  eSKey <- readFileTextEnvelope  (File skeyPath)
+  eSKey <- readFileTextEnvelope (File skeyPath) 
+  -- eSKey <- readFileTextEnvelope (AsSigningKey AsPaymentKey) skeyPath
+  --     :: IO (Either (FileError TextEnvelopeError) (SigningKey PaymentKey)) 
   skey <- case eSKey of
     Left err  -> error $ "Error reading skey: " ++ show err
     Right k   -> return k
@@ -85,6 +87,8 @@ initCloudEnv socketPath networkId skeyPath = do
       ownAddr = makeShelleyAddressInEra ShelleyBasedEraConway networkId
                   (PaymentCredentialByKey pkh)
                   NoStakeAddress
+                  
+  putStrLn $ "Own address: " ++ show(serialiseAddress ownAddr)
 
   -- Local connection
   let conn = LocalNodeConnectInfo
