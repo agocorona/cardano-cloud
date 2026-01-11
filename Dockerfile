@@ -31,8 +31,13 @@ RUN set -eux; \
     export PATH="$PATH:$NIX_BIN_DIR"
 
 # Clonar Cardano Node
-RUN git clone https://github.com/input-output-hk/cardano-node.git /root/cardano-node
-
+# Recomendado: clonar y hacer checkout del tag exacto que usa cardano-api-10.19.1.0
+RUN git clone https://github.com/IntersectMBO/cardano-node.git /root/cardano-node && \
+    cd /root/cardano-node && \
+    git fetch --all --tags && \
+    git checkout tags/10.6.1 && \
+    git submodule update --init --recursive
+    
 # Configuración global de Nix
 RUN printf "experimental-features = nix-command flakes\n\
 build-users-group =\n\
