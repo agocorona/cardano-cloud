@@ -1,10 +1,13 @@
 {
   "name": "Cardano Node + Nix Dev",
-  "image" : "cardano-ubuntu-nix1",
+  // "image" : "cardano-node:10.6.1"
 
-  // "build": {
-  //   "dockerfile": "../Dockerfile"
-  // },
+  "build": {
+    "dockerfile": "../Dockerfile",
+      "args": {
+    // "BUILDKIT_INLINE_CACHE": "0"
+    }
+  },
   "remoteUser": "root",
   "settings": {
     "terminal.integrated.shell.linux": "/bin/bash",
@@ -22,21 +25,21 @@
   },
   // "workspaceFolder": "/workspace",
   "forwardPorts": [3001],
-  "mounts": [
-    // Base de datos persistente (bind mount desde tu máquina)
-    "source=\\\\wsl$\\Ubuntu\\home\\gomezcalbe\\cardano\\preview\\db,target=/data/db,type=bind,consistency=cached",
+"mounts": [
+  // Base de datos persistente (bind mount desde tu máquina)
+  "source=${localEnv:HOME}${localEnv:USERPROFILE}/cardano/preview/db,target=/data/db,type=bind,consistency=cached",
 
-    // Configuraciones (readonly para mayor seguridad)
-    "source=\\\\wsl$\\Ubuntu\\home\\gomezcalbe\\cardano\\preview\\config,target=/config,type=bind,consistency=cached,readonly",
+  // Configuraciones (readonly para mayor seguridad)
+  "source=${localEnv:HOME}${localEnv:USERPROFILE}/cardano/preview/config,target=/config,type=bind,consistency=cached,readonly",
 
-    // Volumen nombrado para el socket IPC (comunicación con cardano-cli)
-    "source=cardano-ipc,target=/ipc,type=volume"
-  ],
+  // Volumen nombrado para el socket IPC (comunicación con cardano-cli)
+  "source=cardano-ipc,target=/ipc,type=volume"
+],
   
-  "postCreateCommand": "bash -c 'mkdir -p ~/cardano/preview/{db,config} && cd ~/cardano/preview/config && curl -L -o config.json https://book.world.dev.cardano.org/environments/preview/config.json && curl -L -o topology.json https://book.world.dev.cardano.org/environments/preview/topology.json && curl -L -o byron-genesis.json https://book.world.dev.cardano.org/environments/preview/byron-genesis.json && curl -L -o shelley-genesis.json https://book.world.dev.cardano.org/environments/preview/shelley-genesis.json && curl -L -o alonzo-genesis.json https://book.world.dev.cardano.org/environments/preview/alonzo-genesis.json && curl -L -o conway-genesis.json https://book.world.dev.cardano.org/environments/preview/conway-genesis.json && echo \"Configs descargados!\"'",
+  "postCreateCommand": "bash -c 'mkdir -p ~/cardano/preview/{db,config} && cd ~/cardano/preview/config && curl -L -o config.json https://book.world.dev.cardano.org/environments/preview/config.json && curl -L -o topology.json https://book.world.dev.cardano.org/environments/preview/topology.json && curl -L -o byron-genesis.json https://book.world.dev.cardano.org/environments/preview/byron-genesis.json && curl -L -o shelley-genesis.json https://book.world.dev.cardano.org/environments/preview/shelley-genesis.json && curl -L -o alonzo-genesis.json https://book.world.dev.cardano.org/environments/preview/alonzo-genesis.json && curl -L -o conway-genesis.json https://book.world.dev.cardano.org/environments/preview/conway-genesis.json && curl -L -o peer-snapshot.json https://book.play.dev.cardano.org/environments-pre/preview/peer-snapshot.json && echo \"Configs descargados!\"'",
 
   // Opcional: si quieres que el nodo arranque automáticamente al entrar
-  // "postStartCommand": "cardano-node run --config /config/config.json --topology /config/topology.json --database-path /data/db --socket-path /ipc/node.socket --host-addr 0.0.0.0 --port 3001 &",
+  // "postStartCommand": "cardano-node run --config ~/cardano/preview/config/config.json --topology ~/cardano/preview/config/topology.json --database-path ~/cardano/preview/data/db --socket-path ~/ipc/node.socket --host-addr 0.0.0.0 --port 3001 &",
 
   "features": {
     "ghcr.io/devcontainers/features/git:1": {}

@@ -8,3 +8,10 @@ repository cardano-haskell-packages
 repository hackage.haskell.org
   url: https://hackage.haskell.org/
   secure: True
+
+
+source-repository-package
+  type:     git
+  location: https://github.com/transient-haskell/transient-stack.git
+  tag:      master
+  subdir:   transient transient-universe transient-universe-tls

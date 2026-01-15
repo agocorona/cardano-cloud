@@ -22,12 +22,8 @@ library
                      , mtl
                      , transient
                      , transient-universe
-                     , cardano-api == 10.19.1.0
-                    --  , cardano-slotting
-                    --  , cardano-ledger-core
-                    --  , ‘ouroboros-consensus-cardano
-                    --  , cardano-ledger-conway
-                    --  , cardano-ledger-shelley
+                     , cardano-api
+
                      , text
                      , syb
                      , base16-bytestring

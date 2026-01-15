@@ -10,6 +10,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DataKinds #-}
 
 {-|
 Basic primitives for the creation of serverless, distributed, durable smart contracts
@@ -23,14 +24,14 @@ TODO: Testing
 
 -}
 
-module CardanoC.Api where
+module CardanoC.Api (module CardanoC.Api, module Transient.Base, module Transient.Move) where
 
 import Cardano.Api
-import Cardano.Api.HasTypeProxy (AsType(..))
-import Cardano.Api.Ledger(PParams)
-import Cardano.Api.Query  -- (QueryEraHistory(..))
-import Cardano.Api (Lovelace(..))
-
+-- import Cardano.Api.Shelley as Shelley  
+import Cardano.Api.Ledger hiding(Tx,TxId,TxIn,Value)   
+-- import Ouroboros.Network.Protocol.LocalStateQuery.Type
+  -- ( Target(..)          -- para GetTip, VolatileTip si existiera, etc.
+  -- )
 
 
 import Transient.Base
@@ -41,13 +42,19 @@ import Transient.Parse
 
 
 import Control.Monad.IO.Class (liftIO)
-import Control.Applicative
-import qualified Data.Set as Set
-import Data.Map as Map
 import Control.Monad 
+import Control.Applicative
+
+import qualified Data.Set as Set
+import qualified Data.Map as Map
+import qualified Data.Text as T
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Base16 as Base16
+
+
+
 import Control.Concurrent(threadDelay)
 
-import Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString as BS
@@ -57,6 +64,9 @@ import GHC.Generics
 
 import Data.Typeable
 import Data.Word (Word8)
+
+
+
 
 data CloudEnv = CloudEnv
   { envConn       :: LocalNodeConnectInfo
@@ -74,16 +84,18 @@ initCloudEnv
   -> IO CloudEnv
 initCloudEnv socketPath networkId skeyPath = do
   -- Load signing key
-  eSKey <- readFileTextEnvelope (File skeyPath) 
-  -- eSKey <- readFileTextEnvelope (AsSigningKey AsPaymentKey) skeyPath
-  --     :: IO (Either (FileError TextEnvelopeError) (SigningKey PaymentKey)) 
+  eSKey <- readFileTextEnvelope (File skeyPath)
+    :: IO (Either (FileError TextEnvelopeError) (SigningKey PaymentExtendedKey))
   skey <- case eSKey of
     Left err  -> error $ "Error reading skey: " ++ show err
     Right k   -> return k
 
-  -- Derive own address
-  let vkey = castVerificationKey (getVerificationKey skey) :: VerificationKey PaymentKey
-      pkh  = verificationKeyHash vkey
+  -- CORRECCIÓN: Usar la vkey extendida para obtener el hash.
+  -- Necesitamos convertir explícitamente la VerificationKey PaymentExtendedKey
+  -- a VerificationKey PaymentKey antes de obtener el hash.
+  let vkeyExtended = getVerificationKey skey
+      vkeyPayment  = castVerificationKey vkeyExtended :: VerificationKey PaymentKey
+      pkh          = verificationKeyHash vkeyPayment
       ownAddr = makeShelleyAddressInEra ShelleyBasedEraConway networkId
                   (PaymentCredentialByKey pkh)
                   NoStakeAddress
@@ -120,6 +132,8 @@ initCloudEnv socketPath networkId skeyPath = do
     , envNetworkId  = networkId
     , envEra        = currentEra
     }
+
+
 
 
 ask= getState <|> error ("cardano cloud: no state") :: TransIO CloudEnv
@@ -172,6 +186,7 @@ waitSeconds secs =  do
 -- 5. getUTxOsAt → Uses queryNodeLocalState with the existing connection
 getUTxOsAtIO :: CloudEnv -> AddressInEra ConwayEra -> IO (UTxO ConwayEra)
 getUTxOsAtIO env addr = do
+  ttr "getUTxOsAtIO"
   let conn = envConn env
       addrAny = case deserialiseAddress AsAddressAny (serialiseAddress addr) of
                   Nothing   -> error "Invalid address conversion"
@@ -181,27 +196,94 @@ getUTxOsAtIO env addr = do
                      (QueryUTxO (QueryUTxOByAddress (Set.singleton addrAny)))
 
   result <- liftIO $ runExceptT  $ queryNodeLocalState conn VolatileTip  query
+  ttr ("after getUTxOsAtIO")
   case result of
     Left acquireFail -> error $ "Acquire failed: " ++ show acquireFail
     Right (Left e)   -> error $ "Acquire failed: " ++ show e
     Right (Right utxo)       -> return utxo
 
 
+buildAndBalanceTxEstimateIO env bodyContent = do
+  let conn       = envConn env
+      ownAddr    = envOwnAddress env
+      rawPParams = envPParams env  -- PParams (ShelleyLedgerEra ConwayEra)
+  
+  utxo <- getUTxOsAtIO env ownAddr
+  ttr("UTXOs disponibles: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
 
-buildAndBalanceTxIO :: CloudEnv -> TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
-buildAndBalanceTxIO env bodyContent = do
+  let shelleyBasedEra = ShelleyBasedEraConway
+      maryEraOnwards = MaryEraOnwardsConway
+
+      stakePools :: Set.Set PoolId
+      stakePools = Set.empty
+
+      depositReturns :: Map.Map StakeCredential Coin
+      depositReturns = Map.empty
+
+      -- drepReturns :: Map.Map DRepCredential Coin
+      drepReturns = Map.empty
+
+      exUnitsMap :: Map.Map ScriptWitnessIndex ExecutionUnits
+      exUnitsMap = Map.empty
+
+      initialFee :: Coin
+      initialFee = Coin 0
+
+      keyWits :: Int
+      keyWits = 1
+
+      scriptWits :: Int
+      scriptWits = 0
+
+      refSize :: Int
+      refSize = 0
+
+      selectedTxIns = Map.keys (unUTxO utxo)
+
+      totalInputValue :: Value
+      totalInputValue = foldMap go (Map.elems $ unUTxO utxo)
+        where
+          go (TxOut _addr txOutVal _datum _refScript) = txOutValueToValue txOutVal
+
+
+
+      bodyContent' = bodyContent { txIns = txIns bodyContent ++ map (\txin -> (txin, BuildTxWith (KeyWitness KeyWitnessForSpending))) selectedTxIns }
+
+  ttr "autobalance"
+  let balancedEither = estimateBalancedTxBody
+                      maryEraOnwards
+                      bodyContent'
+                      rawPParams
+                      stakePools
+                      depositReturns
+                      drepReturns
+                      exUnitsMap
+                      initialFee
+                      keyWits
+                      scriptWits
+                      refSize
+                      ownAddr
+                      totalInputValue
+
+  either (\err -> error $ "Error balancing tx: " ++ show err)
+         return
+         (do r <-balancedEither; ttr "after autobalance"; return r)
+
+-- | balancing using makeTransactionBodyAutoBalance
+buildAndBalanceTxAutoIO :: CloudEnv -> TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
+buildAndBalanceTxAutoIO env bodyContent = do
   let conn       = envConn env
       ownAddr    = envOwnAddress env
       rawPParams = envPParams env  -- PParams (ShelleyLedgerEra ConwayEra)
 
   utxo <- getUTxOsAtIO env ownAddr
-
+  ttr("UTXOs disponibles: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
   systemStart <- runExceptT (queryNodeLocalState conn VolatileTip QuerySystemStart)
                  >>= either (error . show) return
 
   eraHistory <- runExceptT (queryNodeLocalState conn VolatileTip QueryEraHistory)
                 >>= either (error . show) return
-
+  ttr "after era history"
   let shelleyBasedEra = ShelleyBasedEraConway
 
       epochInfo = toLedgerEpochInfo eraHistory
@@ -215,9 +297,9 @@ buildAndBalanceTxIO env bodyContent = do
       depositReturns = Map.empty
 
       -- Parameter for DRep deposit returns (empty if you don't unregister DReps)
-      drepReturns :: Map.Map a Coin
+      drepReturns :: Map.Map (Credential 'DRepRole) Coin
       drepReturns = Map.empty
-
+  ttr "autobalance"
   let autoBalance = makeTransactionBodyAutoBalance
                       shelleyBasedEra
                       systemStart
@@ -225,20 +307,22 @@ buildAndBalanceTxIO env bodyContent = do
                       ledgerPParams
                       stakePools
                       depositReturns
-                      drepReturns  -- ← Here goes the "undefined" typed as Map.empty
+                      drepReturns 
                       utxo
                       bodyContent
-
-      balancedEither = autoBalance ownAddr Nothing
-
+      
+      balancedEither = do r <- autoBalance ownAddr Nothing;   ttr ("after autobalance"); return r
+  
+   
   either (\err -> error $ "Error balancing tx: " ++ show err)
          return
          balancedEither
 
 
+
 -- | Firma una transacción balanceada (BalancedTxBody) usando la signing key del entorno.
 --   Extrae el TxBody real del BalancedTxBody para poder firmarlo.
-signTxServerIO :: CloudEnv -> BalancedTxBody ConwayEra -> IO (Tx ConwayEra)
+signTxServerIO :: MonadIO m => CloudEnv -> BalancedTxBody ConwayEra -> m ( Tx ConwayEra)
 signTxServerIO env balancedTxBody = do
   let skey = envSigningKey env  -- Asumimos PaymentSigningKey o similar
 
@@ -262,7 +346,7 @@ signTxServerIO env balancedTxBody = do
 
 
 data UnsignedTx = UnsignedTx
-  { cborHex :: Text
+  { cborHex :: T.Text
   } deriving (Show, Generic, ToJSON, FromJSON)
 
 
@@ -283,7 +367,7 @@ instance (Read a, Show a,SerialiseAsCBOR a) => Loggable (CBORData a) where
 
 -- | signs with the private key envSingningKey
 signTxBrowser ::  BalancedTxBody ConwayEra
-              -> TransIO (Tx ConwayEra)
+              -> TransIO ( Tx ConwayEra)
 signTxBrowser balanced = do
   -- 1. We build and balance, we get the TxBody
   (cborHex, txBody) <-  do
@@ -294,9 +378,10 @@ signTxBrowser balanced = do
           cborBytes = serialiseToCBOR unsignedTx   -- we serialize the balancedTxBody directly
           cborHex = TE.decodeUtf8 $ B16.encode cborBytes
       return (cborHex, txBody)
-
+  ttr "sign browser"
   -- 2. One step: we send the unsigned and receive the clean witnessesHex
   POSTData witnessesHex <- unCloud $ minput "sign" $ UnsignedTx { cborHex = cborHex }
+  ttr "after sign"
 
   -- 3. We deserialize the witness received from the browser (the wallet already signed it)
   do
@@ -319,95 +404,154 @@ signTxBrowser balanced = do
 
 
 
-instance Loggable TxId
+instance Loggable  TxId
 
 
-submitSignedTx :: Tx ConwayEra -> Cloud TxId
+submitSignedTx ::  Tx ConwayEra -> Cloud  TxId
 submitSignedTx signedTx = local $ do
   env <-  ask 
   liftIO $ submitSignedTxIO env signedTx
 
 -- | Submits a signed transaction to the local Cardano node
 --   and returns the transaction ID upon success.
-submitSignedTxIO :: CloudEnv -> Tx ConwayEra -> IO TxId
+submitSignedTxIO :: CloudEnv ->  Tx ConwayEra -> IO  TxId
 submitSignedTxIO env signedTx = do
   let conn = envConn env  -- Assume this is LocalNodeConnectInfo CardanoMode
 
   -- Submit using the correct TxInMode wrapper for Conway
+  ttr "submit"
   result <- submitTxToNodeLocal
               conn
               (TxInMode (shelleyBasedEra :: ShelleyBasedEra ConwayEra) signedTx)
-
+  ttr "after submit"
   case result of
     SubmitSuccess -> pure $ getTxId (getTxBody signedTx)
     SubmitFail reason -> error $ "Submit failed: " ++ show reason
 
-buildAndSubmitTx :: TxBodyContent BuildTx ConwayEra -> Cloud TxId
-buildAndSubmitTx content = local $ do
+-- | Nueva función de balanceo que utiliza `makeTransactionBodyAutoBalance`
+--   corrigiendo el problema de ambigüedad de tipos que causaba el bloqueo.
+buildAndBalanceTxIO :: CloudEnv -> UTxO ConwayEra ->TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
+buildAndBalanceTxIO env utxo bodyContent = do
+  let conn       = envConn env
+      ownAddr    = envOwnAddress env
+      rawPParams = envPParams env
+
+  -- utxo <- getUTxOsAtIO env ownAddr
+  -- ttr("UTXOs disponibles: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
+  systemStart <- runExceptT (queryNodeLocalState conn VolatileTip QuerySystemStart)
+                 >>= either (error . show) return
+
+  eraHistory <- runExceptT (queryNodeLocalState conn VolatileTip QueryEraHistory)
+                >>= either (error . show) return
+  ttr "after era history"
+
+  let shelleyBasedEra = ShelleyBasedEraConway
+      epochInfo = toLedgerEpochInfo eraHistory
+      ledgerPParams = LedgerProtocolParameters rawPParams
+      stakePools = Set.empty
+      depositReturns = Map.empty
+      -- CORRECCIÓN: Usamos los tipos de mapa correctos que espera la API,
+      -- especificando el tipo concreto para `drepReturns`.
+      drepReturns :: Map.Map (Credential 'DRepRole) Coin
+      drepReturns = Map.empty
+
+  ttr "autobalance con makeTransactionBodyAutoBalance"
+  let autoBalance = makeTransactionBodyAutoBalance
+                      shelleyBasedEra
+                      systemStart
+                      epochInfo
+                      ledgerPParams
+                      stakePools
+                      depositReturns
+                      drepReturns
+                      
+                      utxo
+                      bodyContent
+
+      balancedEither = do r <- autoBalance ownAddr Nothing; ttr ("after autobalance"); return r
+  ttr ("ownAddr:",envOwnAddress env)
+  ttr ("bodyContent completo", bodyContent)  -- Ver si hay extras ocultos
+  ttr ("ownAddr serialized: ", case envOwnAddress env of
+            AddressInEra _ addr -> serialiseAddress $ toAddressAny addr)
+
+
+
+  either (\err -> error $ "Error balancing tx: " ++ show err) return balancedEither
+
+-- | Nueva función de construcción y envío que usa el autobalanceo corregido.
+buildAndSubmitTx ::  TxBodyContent BuildTx ConwayEra -> Cloud  TxId
+buildAndSubmitTx  content = local $ do
   env <- ask
-  body   <-  liftIO $ buildAndBalanceTxIO env content
-  signed <- signTxBrowser body
+  utxo <-  liftIO $ getUTxOsAtIO env (envOwnAddress env)
+  buildAndSubmitTxIO env utxo content
+
+buildAndSubmitTxIO :: MonadIO m => CloudEnv -> UTxO ConwayEra -> TxBodyContent BuildTx ConwayEra -> m  TxId
+buildAndSubmitTxIO env utxo content= do
+  ttr "balance"
+  body   <-  liftIO $ buildAndBalanceTxIO env utxo content -- Llama a la nueva función de balanceo
+  ttr "after balance"
+  signed <- signTxServerIO env body
   liftIO $ submitSignedTxIO env signed
 
 
 
--- -- | Default / minimal TxBodyContent in BuildTx mode for ConwayEra (compatible con 10.19.1.0).
--- --   Use as base and override fields as needed.
--- --   - txIns will be auto-filled by buildAndSubmitTx / auto-balance
--- --   - Fee starts explicit at 0 (recalculated later)
--- defaultTxBodyContent :: TxBodyContent BuildTx ConwayEra
--- defaultTxBodyContent = TxBodyContent
---   { txIns                = []                          -- Auto-filled later
---   , txInsCollateral      = TxInsCollateralNone
---   , txInsReference       = TxInsReferenceNone
---   , txOuts               = []                          -- Override for payments
---   , txTotalCollateral    = TxTotalCollateralNone
---   , txReturnCollateral   = TxReturnCollateralNone
---   , txFee                = TxFeeExplicit (lovelaceFromInteger 0)
---   , txValidityLowerBound = TxValidityNoLowerBound
---   , txValidityUpperBound = TxValidityNoUpperBound      -- Correct constructor
---   , txMetadata           = TxMetadataNone
---   , txAuxScripts         = TxAuxScriptsNone
---   , txExtraKeyWits       = TxExtraKeyWitnessesNone     -- Renamed field
---   , txProtocolParams     = BuildTxWith Nothing         -- Auto-injected
---   , txWithdrawals        = TxWithdrawalsNone
---   , txCertificates       = TxCertificatesNone
---   , txUpdateProposal     = TxUpdateProposalNone
---   , txMintValue          = TxMintValue mempty (BuildTxWith Map.empty)  -- No minting
---   , txScriptValidity     = TxScriptValidity Nothing                    -- Safe default
---   , txProposalProcedures = Nothing                     -- Conway governance
---   , txVotingProcedures   = Nothing                     -- Conway votes
---   , txCurrentTreasuryValue = Nothing                   -- Conway treasury
---   }
+
+
+pay ::   AddressInEra ConwayEra -> Lovelace -> Cloud  TxId
+pay  targetAddr amount = local $ do
+  env <- getState <|> error "pay: No env"
+  payIO env targetAddr amount 
 
 
 -- 2. pay: Sends ADA to any address
-pay :: AddressInEra ConwayEra -> Lovelace -> Cloud TxId
-pay targetAddr amount =
-  buildAndSubmitTx $
-    let bodyContent = defaultTxBodyContent shelleyBasedEra
-    in bodyContent 
-      { txOuts =
+payIO :: MonadIO m => CloudEnv -> AddressInEra ConwayEra -> Lovelace -> m TxId
+payIO env targetAddr amount = liftIO $ do
+  -- Query all UTXOs at owner's address
+  -- This is a temporal fix, since the balance in general in 10.16- 10.19 versions of cardano-api seems that it don't work with empty txIns
+  utxo <- getUTxOsAtIO env (envOwnAddress env)
+  let utxoList = Map.toList (unUTxO utxo)
+  
+  -- Check if there are any UTXOs
+  when (null utxoList) $ 
+    error "payIO: No UTXOs available at owner address"
+  
+  -- Convert all UTXOs to txIns with KeyWitnessForSpending
+  let txInsList = map (\(txIn, _) -> (txIn, BuildTxWith (KeyWitness KeyWitnessForSpending))) utxoList
+  
+  buildAndSubmitTxIO env utxo $
+    let shelleyBasedEra = ShelleyBasedEraConway
+        bodyContent = defaultTxBodyContent shelleyBasedEra
+    in bodyContent
+      { txIns = txInsList  -- Use all UTXOs as inputs
+      , txOuts =
           [ TxOut
               targetAddr
               (lovelaceToTxOutValue shelleyBasedEra amount)
               TxOutDatumNone
               ReferenceScriptNone
           ]
+      , txProposalProcedures = Nothing
+      , txVotingProcedures = Nothing
+      , txCertificates = TxCertificatesNone
+      , txWithdrawals = TxWithdrawalsNone
       }
 
+
 -- 1. lock: Locks funds in a script with inline datum
-lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud TxId
+lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud  TxId
 lock scriptAddr amount datum =
-  buildAndSubmitTx $
-    let content= defaultTxBodyContent shelleyBasedEra 
+  buildAndSubmitTx $ -- Usamos el nuevo `buildAndSubmitTx`
+    let 
+      shelleyBasedEra = ShelleyBasedEraConway
+      era = BabbageEraOnwardsConway
+      content= defaultTxBodyContent shelleyBasedEra 
     in content
       { txOuts =
           [ TxOut
                 scriptAddr (lovelaceToTxOutValue shelleyBasedEra amount)
                 (TxOutDatumInline era (unsafeHashableScriptData datum)) ReferenceScriptNone
           ]
+      -- CORRECCIÓN: Para la era Conway, se debe especificar explícitamente que no hay propuestas.
+      , txProposalProcedures = Just (Featured ConwayEraOnwardsConway TxProposalProceduresNone)
       }
-  where
-    era = BabbageEraOnwardsConway
 
