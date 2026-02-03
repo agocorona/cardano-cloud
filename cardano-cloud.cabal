@@ -16,6 +16,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     CardanoC.SF
                        CardanoC.Api
+                       CardanoC.Api.UTxOSelector
                        
   build-depends:       base >= 4.7 && < 5
                      , containers
@@ -28,6 +29,10 @@ library
                      , syb
                      , base16-bytestring
                      , bytestring
+                     , data-default
+                     , random
+
+                     , aeson
                      
   default-language:    Haskell2010
 
