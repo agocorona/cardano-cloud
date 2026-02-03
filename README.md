@@ -12,8 +12,20 @@ This is where examples and specific cardano-cloud primitives will be included. T
     - The transient stack: https://github.dev/transient-haskell/transient-stack
 - Most of the work carried out now is devoted to develop and tune the persistence primitives
     - To preserve non serializable state across shutdowns and restarts. Done
-    - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms
-    - Specially when the state includes non serializable things like backtracking handlers
+    - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms. Doen
+    - Specially when the state includes non serializable things like backtracking handlers.Done
+    - Direct integration with cardano-api to implement high level primitives. Going on
+    - Testting recovery with arbitrary shutdowns. on going
+    - A general web application (Web console) done in vanilla Javascript and HTML. loads when the cardano cloud node is invoked. Allows for full interaction with any cardano-cloud program. Permits the execution of the contract. This contains all the code for wallet connection, signing transactions and examination of the requests and responses. It contains example code to grab for custom web interfaces. Done
+
+    ![alt text](image.png)
+
+    - All the previous points can be improved for robustness, performance and modularity.
+    - further improvements: multisign, utxo selection, primitives for complex transactions, backtracking and autohealing on complex error conditions. Pattern discovery for the creation of more composable and higher level primitives.
+    - Caching: a graph database, using the haskell package TCache synchronized with the Cardano node for fast querying wallet accounts, utxos etc. 
+    - Tests with IPFS persistence and ditributed
+    - Distributed computing for scalability and reliability. To create a L2 over Cardano.
+
 
 imagine thounsands of requests being gathered by this code:
 
