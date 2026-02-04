@@ -21,11 +21,16 @@ This is where examples and specific cardano-cloud primitives will be included. T
     ![alt text](image.png)
 
     - All the previous points can be improved for robustness, performance and modularity.
-    - further improvements: multisign, utxo selection, primitives for complex transactions, backtracking and autohealing on complex error conditions. Pattern discovery for the creation of more composable and higher level primitives.
-    - Caching: a graph database, using the haskell package TCache synchronized with the Cardano node for fast querying wallet accounts, utxos etc. 
-    - Tests with IPFS persistence and ditributed
-    - Distributed computing for scalability and reliability. To create a L2 over Cardano.
-
+    - further improvements: 
+      - Patterns -> primitives for transacitions with n signers, 
+      - utxo selection
+      - identify backtracking conditions for autohealing in complex situations. 
+      - Pattern discovery for the creation of more composable and higher level primitives.
+      - Caching: a graph database, using the haskell package TCache synchronized with the Cardano node for fast querying wallet accounts, utxos etc. 
+      - Tests with IPFS persistence
+      - Distributed computing for scalability and reliability. To create a L2 services over Cardano.
+      - ...
+      - Tons of things to do.
 
 imagine thounsands of requests being gathered by this code:
 
@@ -49,9 +54,7 @@ for each request, and there may be thounsands of them, the failed funding handle
 - get fees that was set *at the end* of the contract 
 - refund the investor even if the server has been shut down in the middle
 
-Testnet integration: In progress (Milestone 1, Jan 2026)
 
-Full MVP: Q1 2026 via Catalyst F15 / IOR CFP
 
 ## Catalyst proposal
 
