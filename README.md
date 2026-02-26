@@ -2,9 +2,7 @@
 
 A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesary for the execution.
 
-This is where examples and specific cardano-cloud primitives will be included. That is
-- integration with cardano-api, cardano-node.  (Api.hs)
-- Specific cardano-cloud patterns and primitives. (SF.hs)
+see docs for description, activity and notes
 
 ## Status
 - Core runtime: Working. It essentially the Transient stack with additions for persistence
@@ -12,11 +10,13 @@ This is where examples and specific cardano-cloud primitives will be included. T
     - The transient stack: https://github.dev/transient-haskell/transient-stack
 - Most of the work carried out now is devoted to develop and tune the persistence primitives
     - To preserve non serializable state across shutdowns and restarts. Done
-    - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms. Doen
+    - To manage state when many requests are summarized in a single response such is the case in collect and algebraic operations with various terms. Done
     - Specially when the state includes non serializable things like backtracking handlers.Done
     - Direct integration with cardano-api to implement high level primitives. Going on
-    - Testting recovery with arbitrary shutdowns. on going
-    - A general web application (Web console) done in vanilla Javascript and HTML. loads when the cardano cloud node is invoked. Allows for full interaction with any cardano-cloud program. Permits the execution of the contract. This contains all the code for wallet connection, signing transactions and examination of the requests and responses. It contains example code to grab for custom web interfaces. Done
+        - generalized transactions with multiple wallets assets, contracts, selection of utxos, balancing, multisign in browsers,  - ongoing
+        - Cache for fast queries - ongoing
+    - Testting recovery with arbitrary shutdowns. mostly done
+    - A general web application (Web console) in vanilla Javascript and HTML. loads when the cardano cloud node is invoked. Allows for full interaction with any cardano-cloud program. Permits the execution of the contract. This contains all the code for wallet connection, signing transactions and examination of the requests and responses. It contains example code to grab for custom web interfaces. Done
 
     ![alt text](image.png)
 
@@ -67,4 +67,5 @@ defiAuction = do
   bids <- collect 100 3600000000 $ minput "/bid" minPayload
   winner <- selectWinner bids
   liftCTL $ pay winner (amount winner * 1_000_000)
+
 
