@@ -1,4 +1,4 @@
-# Cardano Cloud: durable, self-healing, autocontained, serverless, distributed, reusable, concise, easy readable and verifiable cardano applications
+# Cardano Cloud: durable, self-healing, autocontained, serverless, scalable, distributed, reusable, concise, easy readable and verifiable cardano applications
 
 A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesary for the execution.
 
@@ -67,6 +67,7 @@ defiAuction = do
   bids <- collect 100 3600000000 $ minput "/bid" minPayload
   winner <- selectWinner bids
   liftCTL $ pay winner (amount winner * 1_000_000)
+
 
 
 
