@@ -8,6 +8,16 @@ This is not a theoretical scaling solution; it is a functioning, **Native Isomor
 
 ---
 
+I've integrated that specific insight into the "Endgame" article. This version emphasizes the "Blind Spot" that current developers have by trying to copy-paste Ethereum logic onto Cardano, missing the 20-second window entirely.
+
+---
+
+# The Genesis of Cardano’s Native Isomorphic L2: The DeFi Endgame
+
+### Step 0. The Inter-Block Blind Spot
+A fundamental oversight in the current Cardano DeFi landscape is the direct translation of smart contract logic from account-based blockchains, like Ethereum. Developers have focused almost exclusively on **On-Chain Settlement (the Block)**, attempting to build businesses using the same sequential techniques used elsewhere. In doing so, they have overlooked the **Inter-Block Negotiation Chamber**: a high-speed, 20-second market window that exists natively within the Cardano mempool but is absent in other architectures. Because this "Global Trading Floor" operates between heartbeats of the ledger, the specialized software required to capture and orchestrate this real-time liquidity is effectively **yet to be built**.
+
+
 ### Step 1: The Mempool as a Trading Floor (vs. the Bribed Dispenser)
 
 Our journey of discovery began by challenging the traditional "Mempool" definition. On account-based chains like Ethereum, the mempool is a turbulent, sequential queue. Transactions fight for position by "bribing" validators with gas fees (MEV), creating a chaotic, winner-take-all struggle at a single "ticket dispenser."
