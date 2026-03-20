@@ -28,3 +28,4 @@ The infrastructure for the DeFi Endgame is being built now. Are you watching the
 
 `#Cardano #ADA #DeFi #EUTxO #CryptoEconomics #Scaling #Web3 #BlockchainArchitecture`
 
+<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/e9d464d9-7ce4-403c-a29d-6ce68450c69d" />
