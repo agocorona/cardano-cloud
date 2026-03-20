@@ -19,6 +19,11 @@ The efficiency of a batcherless DEX or a Futures platform lies in **Chaining**.
 4.  **T+500ms:** A second Matcher or Liquidator detects our Match Tx and chains a third transaction.
 * **Result:** At the 20-second mark, Block N+1 is minted containing a logical sequence of multiple interactions that were finalized off-chain in milliseconds.
 
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/8108d886-43c2-46bd-98ac-834b2b814424" />
+
+
+
 ### 4. Implementation Example (cardano-api 10.19)
 The following Haskell snippet demonstrates how to construct a "Chained Transaction" by referencing a `TxId` that exists only in the mempool.
 
