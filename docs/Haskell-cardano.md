@@ -1,6 +1,11 @@
 
 ## The Haskell Paradox in Cardano: When Type Systems Become Barriers
 
+
+The strategic pivot of Cardano towards a multi-language ecosystem—incorporating **Rust** and **Go** for node development—marks a sobering moment of pragmatism for IOHK. In a recent broadcast, Charles Hoskinson candidly addressed the technical debt and the steep barriers created by the current stack, admitting with a touch of frustration, **"We won't get rid of Haskell this year,"** or even in the next few months. This "inability to escape" Haskell reveals a deeper crisis: it is not the language's performance that has failed, but a development culture that has prioritized academic "type-purity" over the stability and simplicity required for a global financial infrastructure.
+
+Maybe in this video? http://www.youtube.com/watch?v=Xh9BfxrXvEk I'm not sure 
+
 The choice of Haskell for Cardano was rooted in the promise of mathematical rigor. However, the "standard" implementation has fallen into a trap similar to the one that once plagued **Java**: an era of absurd design patterns and hyper-abstraction that made the language a burden. Just as **Google rescued Java with Android** by returning to a degree of sanity and pragmatic utility, Haskell in the blockchain space is in desperate need of a similar intervention.
 
 ### 1. The Hijacking of the Type System
