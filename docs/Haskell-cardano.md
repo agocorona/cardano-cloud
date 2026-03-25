@@ -30,6 +30,5 @@ The path forward requires embracing:
 ### Conclusion: A Return to Sanity
 Haskell does not have to be this complicated. Its true strength lies in its ability to compose logic elegantly. If Cardano is to thrive, it must rescue **functionality from the tyranny of purity**. The goal of the Haskell community should shift from a desire for academic status to a **desire to be useful**. It is time to stop fighting the compiler and start building for the real world.
 
----
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/2c423d79-533d-43e3-9d43-56847840f5b8" />
 
-**Would you like me to generate a catchy title for this article, or perhaps a short summary to use as a "hook" for social media (X/LinkedIn)?**
