@@ -29,5 +29,6 @@ Haskell can offer Cardano and the developer community so much more if it moves t
 ### Conclusion: A Return to Sanity
 Haskell does not have to be this complicated. Its true strength lies in its ability to compose logic elegantly. If Cardano is to thrive, it must rescue **functionality from the tyranny of purity**. It is time to stop using the type system as a ritual and start using Haskell’s unique features—Linear Types, continuations, and applicative composition—to build a stable, useful, and high-performance future.
 
+<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/0b627ca0-7050-4722-a54a-8e9aee2e3c0c" />
 
 **#Cardano #Haskell #LinearTypes #RustLang #SoftwareEngineering #SimpleHaskell #Blockchain #FunctionalProgramming #Pragmatism #LLM**
