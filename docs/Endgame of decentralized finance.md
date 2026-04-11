@@ -48,6 +48,9 @@ The block isn't where the trade is made; it's where the trade is **certified**. 
 
 ---
 
+<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/b7e1cf78-52d5-422f-8d0e-75ae7941c340" />
+
+
 ### Step 4: The Endgame of Decentralized Finance
 
 With this infrastructure understood, the true potential of Cardano DeFi comes into focus. When the mempool is treated as a native, shared L2, siloed "DEXes" become obsolete, and we arrive at the **Endgame of DeFi**.
