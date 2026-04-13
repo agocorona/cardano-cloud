@@ -24,6 +24,9 @@ Our journey of discovery began by challenging the traditional "Mempool" definiti
 
 We concluded that **Cardano's mempool is a decentralized, parallel trading floor.** Because EUTxO transactions spend specific, unique UTxOs, they are independent. This allows Matcher bots to identify and "shake hands" on dozens of non-interfering trades simultaneously within the mempool. It is a collaborative, deterministic, and highly efficient environment.
 
+
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/61afd761-e27f-4d23-863d-14f073dee33d" />
+
 ---
 
 ### Step 2: Validating "Junk" and "Double Spends" (Mempool Integrity)
