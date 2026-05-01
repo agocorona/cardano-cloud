@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
-module CardanoC.Api.UTxOSelector (selectUtxos, SelectionStrategy() )where
+module CardanoC.Api.UTxOSelector  (selectUtxos, SelectionStrategy(..) )where
 
 import Cardano.Api
 import Data.List (foldl', sortOn, find, partition)
@@ -7,49 +7,32 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Coerce
 type AssetRequest = (Either Lovelace AssetId, Integer)
-type CUTxO = UTxO ConwayEra
+type CUTxO = (TxIn, TxOut CtxUTxO ConwayEra)
 data SelectionStrategy = MinUtxos | MinDust | ForTx | ForCollateral
 
-getTxOut :: CUTxO -> Maybe (TxOut CtxUTxO ConwayEra)
-getTxOut utxo = case Map.toList (unUTxO utxo) of
-  [(txIn, txOut)] -> Just txOut
-  _ -> Nothing
-
 getLovelace :: CUTxO -> Integer
-getLovelace utxo = 
-  case getTxOut utxo of
-    Just (TxOut _ txValue _ _) -> fromIntegral (unCoin (txOutValueToLovelace txValue))
-    Nothing -> 0
+getLovelace (_, (TxOut _ txValue _ _)) = fromIntegral (unCoin (txOutValueToLovelace txValue))
 
 getAssetQty :: AssetId -> CUTxO -> Integer
-getAssetQty assetId utxo =
-  case getTxOut utxo of
-    Just (TxOut _ txValue _ _) -> 
+getAssetQty assetId (_, (TxOut _ txValue _ _)) =
       coerce (selectAsset (txOutValueToValue txValue) assetId :: Quantity)
-    Nothing -> 0
 
 isPureAda :: CUTxO -> Bool
-isPureAda utxo =
-  case getTxOut utxo of
-    Just (TxOut _ txValue _ _) ->
+isPureAda (_, (TxOut _ txValue _ _)) =
       let value = txOutValueToValue txValue
           adaValue = lovelaceToValue (txOutValueToLovelace txValue)
       in value == adaValue
-    Nothing -> False
 
 addValues :: Value -> Value -> Value
 addValues = mappend
 
 isCollateralEligible :: CUTxO -> Bool
-isCollateralEligible utxo = 
-  case getTxOut utxo of
-    Just (TxOut _ _ datum _) -> isPureAda utxo && datum == TxOutDatumNone
-    Nothing -> False
+isCollateralEligible utxo@(_, (TxOut _ _ datum _)) = isPureAda utxo && datum == TxOutDatumNone
 
-selectUtxos :: [CUTxO] -> [AssetRequest] -> SelectionStrategy -> Maybe [CUTxO]
-selectUtxos allUtxos requests strategy =
+selectUtxos :: [CUTxO] -> [AssetRequest] -> SelectionStrategy -> Lovelace -> Maybe [CUTxO]
+selectUtxos allUtxos requests strategy (Coin extraBuffer) =
   let (adaReqs, tokenReqs) = partition isAdaRequest requests
-      totalAdaNeeded = sum (map snd adaReqs)
+      totalAdaNeeded = sum (map snd adaReqs) + extraBuffer
       (selectedNFTs, afterNFTs) = selectNFTs allUtxos tokenReqs
       (selectedTokens, afterTokens) = selectFungibleTokens afterNFTs tokenReqs
       (selectedAda, remainingAda) = selectAda afterTokens totalAdaNeeded strategy
@@ -105,9 +88,8 @@ allAssetsSatisfied selected requests =
   let totalValue = foldl' addValues mempty (map getValue selected)
   in all (isRequestSatisfied totalValue) requests
   where
-    getValue utxo = case getTxOut utxo of
-      Just (TxOut _ txValue _ _) -> txOutValueToValue txValue
-      Nothing -> mempty
+    getValue :: CUTxO -> Value
+    getValue (_, (TxOut _ txValue _ _)) = txOutValueToValue txValue
     
     isRequestSatisfied totalValue (Left _, needed) =
       coerce (unCoin (selectLovelace totalValue)) >= needed
