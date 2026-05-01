@@ -1,0 +1,31 @@
+cradle:
+  multi:
+    - path: "./cardano-cloud/src"
+      config:
+        cradle:
+          cabal:
+            component: "cardano-cloud:lib"
+    - path: "./cardano-cloud/tests"
+      config:
+        cradle:
+          cabal:
+            component: "cardano-cloud:exe:cardano-cloud-test"
+    - path: "./transient-stack/transient/src"
+      config:
+        cradle:
+          cabal:
+            component: "transient:lib"
+    - path: "./transient-stack/transient-universe/src"
+      config:
+        cradle:
+          cabal:
+    - path: "./transient-stack/transient-universe-tls/src"
+      config:
+        cradle:
+          cabal:
+            component: "transient-universe-tls:lib"
+    - path: "./TCache"
+      config:
+        cradle:
+          cabal:
+            component: "TCache"
