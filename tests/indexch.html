@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Conectar Wallet Cardano - Prueba Mínima</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+    button, select { padding: 12px 24px; font-size: 16px; margin: 10px 0; cursor: pointer; }
+    #status { margin: 20px 0; padding: 15px; border-radius: 6px; background: #f0f0f0; }
+    pre { background: #eee; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    .success { background: #e0ffe0; border: 1px solid #0c6; }
+    .error   { background: #ffe0e0; border: 1px solid #c00; }
+  </style>
+</head>
+<body>
+
+  <h1>Conectar Wallet Cardano</h1>
+  <p>Prueba mínima para conectar wallet y enviar datos básicos al servidor.</p>
+
+  <div id="walletSelectorContainer">
+    <label for="walletSelect">Selecciona tu wallet:</label>
+    <select id="walletSelect">
+      <option value="">Cargando wallets...</option>
+    </select>
+  </div>
+
+  <button onclick="connectWallet()">Conectar Wallet</button>
+
+  <div id="status">Estado: Esperando conexión...</div>
+  <pre id="output">Datos que se enviarían al servidor aparecerán aquí...</pre>
+
+  <script>
+    async function loadWallets() {
+      const walletSelect = document.getElementById('walletSelect');
+      if (!window.cardano) {
+        walletSelect.innerHTML = "<option value=''>No se detectó ninguna wallet Cardano</option>";
+        return;
+      }
+
+      const walletNames = Object.keys(window.cardano);
+      if (walletNames.length === 0) {
+        walletSelect.innerHTML = "<option value=''>No hay wallets compatibles disponibles</option>";
+        return;
+      }
+
+      walletSelect.innerHTML = "<option value=''>-- Selecciona una wallet --</option>";
+      walletNames.forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        walletSelect.appendChild(option);
+      });
+    }
+
+    async function connectWallet() {
+      const status = document.getElementById('status');
+      const output = document.getElementById('output');
+      const walletSelect = document.getElementById('walletSelect');
+      const walletName = walletSelect.value;
+
+      if (!walletName) {
+        status.textContent = "Selecciona primero una wallet.";
+        status.className = "error";
+        return;
+      }
+
+      const wallet = window.cardano[walletName];
+      status.textContent = `Intentando conectar con ${walletName}...`;
+      status.className = "";
+
+      try {
+        const api = await wallet.enable();
+
+        const payAddresses = await api.getUsedAddresses() || [];
+        const changeAddress = await api.getChangeAddress() || null;
+        const stakeAddresses = await api.getRewardAddresses() || [];
+
+        const payload = {
+          listPayAddresses: payAddresses,
+          changeAddress: changeAddress ? changeAddress : null,
+          listStakeAddresses: stakeAddresses
+        };
+
+        output.textContent = JSON.stringify(payload, null, 2);
+        status.textContent = `¡Conectado con ${walletName}! Datos recolectados.`;
+        status.className = "success";
+
+        const response = await fetch("http://localhost:8080/addrs/S0", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) throw new Error(`Error del servidor: ${response.status}`);
+        const serverResponse = await response.json();
+        console.log("Respuesta del servidor:", serverResponse);
+        alert("Datos enviados correctamente al servidor!");
+
+      } catch (err) {
+        console.error(err);
+        status.textContent = "Error al conectar o enviar: " + err.message;
+        status.className = "error";
+      }
+    }
+
+    // Cargar wallets al abrir la página
+    loadWallets();
+  </script>
+
+</body>
+</html>

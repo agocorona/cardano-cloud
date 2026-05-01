@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Conectar Wallet Cardano - Prueba Mínima</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+    button { padding: 12px 24px; font-size: 16px; margin: 10px 0; cursor: pointer; }
+    #status { margin: 20px 0; padding: 15px; border-radius: 6px; background: #f0f0f0; }
+    pre { background: #eee; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    .success { background: #e0ffe0; border: 1px solid #0c6; }
+    .error   { background: #ffe0e0; border: 1px solid #c00; }
+  </style>
+</head>
+<body>
+
+  <h1>Conectar Wallet Cardano</h1>
+  <p>Prueba mínima para conectar wallet y enviar datos básicos al servidor.</p>
+
+  <button onclick="connectWallet()">Conectar Wallet</button>
+
+  <div id="status">Estado: Esperando conexión...</div>
+  <pre id="output">Datos que se enviarían al servidor aparecerán aquí...</pre>
+
+  <script>
+    async function connectWallet() {
+      const status = document.getElementById('status');
+      const output = document.getElementById('output');
+
+      status.textContent = "Buscando wallets...";
+      status.className = "";
+
+      if (!window.cardano) {
+        status.textContent = "Error: No se detectó ninguna wallet Cardano (CIP-30). Instala Eternl, Nami, Lace, Trust Wallet, etc.";
+        status.className = "error";
+        return;
+      }
+
+      // Tomar la primera wallet disponible (puedes hacer selector después)
+      const walletNames = Object.keys(window.cardano);
+      if (walletNames.length === 0) {
+        status.textContent = "No hay wallets compatibles disponibles.";
+        status.className = "error";
+        return;
+      }
+
+      // const walletName = walletNames[1]; // ej: eternl, nami, trustwallet...
+      const walletName = "eternl"
+      const wallet = window.cardano[walletName];
+
+      status.textContent = `Intentando conectar con ${walletName}...`;
+
+      try {
+        // Conectar (muestra popup de autorización)
+        const api = await wallet.enable();
+
+        // Obtener datos
+        const payAddresses = await api.getUsedAddresses() || [];
+        const changeAddress = await api.getChangeAddress() || null;
+        const stakeAddresses = await api.getRewardAddresses() || [];
+
+        // Preparar payload compatible con tu tipo UserAddress
+        const payload = {
+          listPayAddresses: payAddresses,                    // array de strings Bech32
+          changeAddress: changeAddress ? changeAddress : null,
+          listStakeAddresses: stakeAddresses                 // array de stake addresses Bech32
+        };
+
+        // Mostrar en pantalla
+        output.textContent = JSON.stringify(payload, null, 2);
+        status.textContent = `¡Conectado con ${walletName}! Datos recolectados.`;
+        status.className = "success";
+
+        // Enviar al servidor (cambia la URL por tu endpoint real)
+        const response = await fetch("http://localhost:8080/addrs/S0", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error del servidor: ${response.status}`);
+        }
+
+        const serverResponse = await response.json();
+        console.log("Respuesta del servidor:", serverResponse);
+        alert("Datos enviados correctamente al servidor!");
+
+      } catch (err) {
+        console.error(err);
+        status.textContent = "Error al conectar o enviar: " + err.message;
+        status.className = "error";
+      }
+    }
+  </script>
+
+</body>
+</html>
