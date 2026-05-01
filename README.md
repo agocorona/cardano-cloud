@@ -1,6 +1,6 @@
-# Cardano Cloud: durable, self-healing, autocontained, serverless, scalable, distributed, reusable, concise, easy readable and verifiable cardano applications
+# Cardano Cloud: durable, self-healing, autocontained, infrastructure-independent, scalable, distributed, reusable, concise, easy readable and verifiable cardano applications
 
-A serverless Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesary for the execution (but the cardano node)
+An infrastructure-independent Haskell Library that turns smart-contract specs into reusable library calls that run verifiable, restart-proof flows. It includes all the necesary for the execution (but the cardano node)
 
 see docs for description, activity and notes
 
