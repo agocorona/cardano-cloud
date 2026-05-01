@@ -6,27 +6,27 @@ Between every two Cardano blocks there is a window of approximately 20 seconds. 
 
 The core idea: a matcher bot observes compatible orders in the mempool, constructs the matching transaction, submits it, and notifies both users — all before the block lands. When settlement happens, the trade is already done. No Layer 2. No bridge. No TVL capture. The mempool is the execution layer; the blockchain is the settlement layer.
 
+![alt text](image-10.png)
+
 This idea is developed in detail in [The End of DeFi Theater](https://x.com/AGoCorona/status/2044377954206068881) and [A Tale of Two Trading Floors](https://github.com/agocorona/cardano-cloud/blob/main/docs/A%20Tale%20of%20Two%20Trading%20Floors.md). The present article addresses a specific objection — and a deeper architectural principle that emerges from it.
 
-## The Auction Room Objection
+## The Settlement Layer Should Not Pick Sides
 
-A natural counter-proposal is to introduce **fee priority** to avoid some problems like contention in the transaction validation: highest fee wins, that leans towards how Ethereum's mempool works. 
+Any policy that governs which transactions a block producer accepts or rejects is, implicitly, a statement about what kind of market Cardano is. That is a choice that should not be made at the protocol level.
 
-It is a coherent idea — but it leads soner of later to the consideration of the mempool as an **auction room**. Each block is a 20-second auction. Participants bid fees to have their transactions included. The highest bidder wins.
+Consider a concrete example: introducing **fee priority** — highest fee wins — to reduce contention when multiple bots attempt to match the same order. It is a coherent engineering response to a real problem. But it carries an architectural consequence that extends far beyond contention: it turns the 20-second block window into an **auction room**, where the rational strategy for every matcher is to wait until the last possible moment before submitting. Why commit early when a competitor might outbid you at second 19? The result is maximum latency by design, fee wars in the final seconds of every block.
+ 
+There is also a concrete engineering cost: any ordering policy that compares competing transactions against each other requires maintaining a priority queue, potentially evicting already-accepted transactions when higher-ranked alternatives arrive, and deferring block assembly until the window closes. Validation is no longer O(1) per transaction. Block filling can no longer happen gradually as transactions arrive. These are not neutral tradeoffs — they have measurable impact on latency and computation.
 
-Fee priority has a structural consequence that destroys the trading floor model: it creates an incentive for every matcher to **wait until the last possible moment** before submitting. Why match early when a competitor might appear with a better offer at second 19? The rational strategy becomes to observe all competing offers across the full 20-second window and bid just enough to win at the end.
+Fee priority is one example, but the same structural problem appears in any selection policy that embeds a market preference: prioritizing matched orders over unmatched ones, favoring low-slippage transactions, rewarding provably optimal executions. Each policy, however well-intentioned, presupposes a particular vision of what DeFi on Cardano should look like — and imposes that vision on every participant.
 
-The result may lead to maximum latency, fee wars in the final seconds of every block, and in the long term the recreation of Ethereum's MEV dynamics inside Cardano's mempool. The 20-second window that enables fast confirmation may become, when traders and bots grow in sophistication, a 20-second auction that guarantees slow confirmation.
-
-There is also a concrete engineering cost: fee-priority validation requires maintaining an ordered queue of competing transactions, comparing them against each other, potentially evicting already-accepted transactions when sligtly higher-fee alternatives arrive. Validation is no longer O(1) per transaction. Block filling can no longer happen gradually as transactions arrive — it must wait until the window closes to know the final ordering. That is not a neutral preference that has real impact in real and perceived latency and cost of computation.
-
-The settlement layer should be as fast and simple as possible. That is how it works until now. **Complexity belongs elsewhere.**
+The settlement layer should be as fast and simple as possible. That is how it works today. **Complexity belongs elsewhere.**
 
 ## Where Complexity Belongs
 
 A common reaction to the mempool-as-trading-floor idea is: "isn't this just optimizing for speed?" It's a fair question. But it misses the point entirely.
 
-This is not a proposal to build a faster Hyperliquid on Cardano. It is a proposal for a **general DeFi architecture** that serves every type of participant — from the scalper who needs milliseconds to the institutional trader who wants optimal price discovery over a negotiation window. Speed is one dimension. Not the only one.
+This is not a proposal to build a Hyperliquid on Cardano. It is a proposal for a **general DeFi architecture** that serves every type of participant — from the scalper who operates with 5x leverage to the institutional trader who wants optimal price discovery over a negotiation window. Speed is one dimension. Not the only one.
 
 The protocol should not presuppose which type of market it serves. It should not prioritize any particular strategy. That decision belongs to the user — expressed not in the protocol rules of Cardano, but in the smart contract and datum of each individual order.
 
@@ -78,9 +78,21 @@ A matcher bot whose source code is open, audited, and demonstrably implements th
 
 Speed stops being the only winning factor. **Trust, transparency, and verifiable behavior become first-class competitive dimensions.**
 
+
+
+![alt text](image-9.png)
+
 There is a further practical benefit: **bot discrimination reduces contention**. In the current model, multiple bots may simultaneously attempt to match the same order, each constructing a competing transaction. All but one will be rejected at settlement, wasting computation, fees, and network bandwidth. When an order's datum explicitly whitelists certain bots, the excluded bots know in advance they will be rejected — so they do not attempt the match at all. Contention drops, the network is less congested, and the winning bot's transaction reaches settlement without competing noise. The whitelist is not just a user preference mechanism — it is a coordination signal that makes the whole system more efficient.
 
 This is not regulation imposed from outside. It is reputation emerging from the market — enforced not by a governance committee but by users exercising choice at the datum level.
+
+But the implications go further than contention reduction and reputation. **Bot selection unlocks arbitrarily complex strategies that no smart contract could ever verify** — because the strategy unfolds over time, not at a single settlement point.
+
+Consider a long-term auction that lasts for days. The order's datum encodes the parameters: duration, minimum price increments, reserve price, expiration. The smart contract is deliberately simple — it only verifies that the transaction was constructed by the whitelisted bot and that the final price meets the floor. Everything else — the accumulation of bids, the management of competing offers over days, the optimal stopping logic — is the bot's responsibility, auditable in its source code but invisible to the contract.
+
+This is a clean separation of concerns: the smart contract enforces the outcome conditions, the bot implements the strategy, and the user selects the bot whose strategy they trust. A user who wants a 72-hour English auction selects a bot known to implement that logic. A user who wants a Dutch auction selects a different one. A user who wants a sealed-bid mechanism selects another. The protocol supports all of them without any changes — because the protocol only sees a UTxO, a datum, and a final transaction that satisfies the contract.
+
+The mempool trading floor is not just a faster settlement layer. It is a **general execution environment** where the sophistication of the market is bounded only by the strategies that bots implement and users choose to trust.
 
 ## Why This Is Only Possible on Cardano
 

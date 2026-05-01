@@ -12,7 +12,7 @@ There is no state machine transitions but monadic statements; no fixed endpoint 
 
 The result is a single, statically-verified Haskell expression that encapsulates multi-user, multi-node processes and can be packaged as a reusable library function.
 
-Cardano Cloud provides the first persistent, serverless, distributed off-chain runtime for Cardano, serving as the foundational layer for third-party DSLs. As proof-of-concept, the runtime will execute representative Marlowe contracts, demonstrating extension of existing Cardano DSLs with persistence and distribution not available today.
+Cardano Cloud provides the first persistent, infrastructure-independent, distributed off-chain runtime for Cardano, serving as the foundational layer for third-party DSLs. As proof-of-concept, the runtime will execute representative Marlowe contracts, demonstrating extension of existing Cardano DSLs with persistence and distribution not available today.
 
 ## Research Team and Institutional Profile
 
@@ -33,7 +33,7 @@ The project will develop Cardano Cloud as a complete, self-contained off-chain r
 The MVP is limited to the core primitives, Cardano integration, two testnet prototypes (auction and distributed DAO vote), and a proof-of-concept execution of representative Marlowe contracts. Full domain-specific DSL development is deferred to future phases.
 
 ### Objectives  
-1. Deliver a persistent, serverless, distributed off-chain runtime that serves as the foundation for third-party domain-specific languages in legal agreements, supply chains and generational assets.  
+1. Deliver a persistent, infrastructure-independent, distributed off-chain runtime that serves as the foundation for third-party domain-specific languages in legal agreements, supply chains and generational assets.  
 2. Enable one-to-one mapping of requirement specifications to executable Haskell code, with full static verification.  
 3. Formalise the continuation-based semantics that underlie persistence and distribution in eUTxO off-chain execution.  
 4. Demonstrate the runtime’s ability to execute representative Marlowe primitives and marlowe contracts (escrow and zero-coupon bond) as proof-of-concept.  

@@ -109,7 +109,7 @@ An auditor reads this in minutes and understands the complete contract of behavi
 
 Hyperliquid proved there is massive demand for fast, low-fee trading with immediate confirmation. But Hyperliquid is a CEX with a governance token. One team controls the orderbook. One point of failure. One point of capture.
 
-This offers the same perceived speed. Real L1 settlement. No single point of control. An open protocol where anyone can run a matcher, anyone can provide liquidity, anyone can build a UI. Competition happens at the service layer — responsiveness, fee structure, UX, network topology — not at the liquidity capture layer. Serverless execution of cardano-cloud programs.
+This offers the same perceived speed. Real L1 settlement. No single point of control. An open protocol where anyone can run a matcher, anyone can provide liquidity, anyone can build a UI. Competition happens at the service layer — responsiveness, fee structure, UX, network topology — not at the liquidity capture layer. Infrastructure-independent execution of cardano-cloud programs.
 
 With Leios on the horizon, Cardano's throughput increases dramatically. The same architecture scales linearly. More matchers, more order flow, same guarantees.
 

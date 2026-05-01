@@ -17,7 +17,7 @@ for cardano-cloud:
 F
 because runghc permits faster iteration:
 
-runghc -w  -threaded -rtsopts -itransient-stack/transient/src -itransient-stack/transient-universe/src -icardano-cloud/src -iTCache cardano-cloud/tests/test.hs --start localhost:8080 --cardanoparams    /opt/cardano/ipc/node.socket  preview ./cardano-cloud/tests/payment.skey
+clear && runghc -w  -threaded -rtsopts -itransient-stack/transient/src -itransient-stack/transient-universe/src -icardano-cloud/src -iTCache cardano-cloud/tests/test.hs --cardanoparams    /opt/cardano/ipc/node.socket  preview ./cardano-cloud/tests/payment.skey
 
 params:
 --start localhost:8080 
@@ -123,4 +123,23 @@ funcionLlamada param  = do
    no se puede mencionar una variable anterio a runAtNamed o produciria un error de compilacion en el codigo llamado
    
 
-  
+el log se encuentra con una orden endpoint nombre
+ ese endpoint como sabe si es un jump o no?
+   si el log tuvera info de su anterior endpoint,
+     consultaria su anterior y podria saber si es un jump
+     endpoint name/closure - stored endpoint
+       si es stored endpoint podrá reconstruirse si no existe
+       pero tiene que reconstruir el original cont-o?
+         no debe reconstruir el original y renombrarlo con su session id
+
+  en en endpoint named poner siempre un jump
+    o no poner jump sino directamente itentar refrescarlo
+    no es posible ya que no conoce su session id
+  cont debe guardar la sesion en la URL
+    las published al menos.
+  ya conoce su sesion. detectar la sesion
+
+  hay que restaurar las closures porque no se puede asegurar que lo exportado por otro usuario está disponible no solo el admin
+     por tanto, tampoco los publish estan disponibles. hay que salvarlos pero solo clos-sesion o DBR
+
+copiar el registro de la sesion del link, grabar uno nuevo con la nueva sesion y enviar a esa closure
