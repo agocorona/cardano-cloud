@@ -26,21 +26,14 @@ TODO: Testing
 
 -}
 
-module CardanoC.Api (module CardanoC.Api, module Transient.Base, module Transient.Move) where
+module CardanoC.Api  where
 
 import Cardano.Api
+import Cardano.Ledger.Coin(Coin)
+import Cardano.Api.Ledger hiding(Tx,TxId,TxIn,Value,Testnet,Mainnet)
 
-import Cardano.Api(TxOut(..))
-
--- import Cardano.Api.Shelley as Shelley  
-import Cardano.Api.Ledger hiding(Tx,TxId,TxIn,Value,Testnet,Mainnet)   
-
-
--- import Ouroboros.Network.Protocol.LocalStateQuery.Type
-  -- ( Target(..)          -- para GetTip, VolatileTip si existiera, etc.
-  -- )
-
-
+import CardanoC.MultiSignedFromBrowsers
+import CardanoC.Sync
 import Transient.Base
 import Transient.Move
 import Transient.Parse
@@ -48,29 +41,27 @@ import Transient.Move.Logged
 import Transient.Move.Utils
 import Transient.Move.Web
 import Transient.Move.Job
+-- import Transient.Indeterminism
+import CardanoC.Defs
 
-
+import Data.TCache
 
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad 
+import Control.Monad
 import Control.Applicative
 
 import Data.List
 import Data.Maybe
 import Data.Char(toLower)
+import Data.Bifunctor (first)
+
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
--- import qualified Data.Text.Lazy.Encoding as TE
-
-import qualified Data.ByteString.Base16 as Base16
-
-
-
-import Control.Concurrent(threadDelay)
-
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Base64 as B64
+
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
@@ -87,92 +78,28 @@ import Data.Aeson.Types (Parser)
 import Data.Typeable
 import Data.Word (Word8)
 import Data.Default
-
+import Data.Either
 import System.Random
 import System.IO
 
-data AppEnv = AppEnv
-  { envConn       :: LocalNodeConnectInfo
-  , envSigningKey :: SigningKey PaymentExtendedKey
-  , envOwnAddress :: AddressInEra ConwayEra
-  , envPParams    :: PParams (ShelleyLedgerEra ConwayEra)  -- Key change here
-  , envNetworkId  :: NetworkId
-  , envEra        :: AnyCardanoEra
-  }
-
-initAppEnv 
-  :: FilePath
-  -> NetworkId
-  -> FilePath
-  -> IO AppEnv
-initAppEnv socketPath networkId skeyPath = do
-  -- Load signing key
-  eSKey <- readFileTextEnvelope (File skeyPath)
-    :: IO (Either (FileError TextEnvelopeError) (SigningKey PaymentExtendedKey))
-  skey <- case eSKey of
-    Left err  -> error $ "Error reading skey: " ++ show err
-    Right k   -> return k
-
-  -- CORRECTION: Use the extended vkey to get the hash.
-  -- We need to explicitly convert the VerificationKey PaymentExtendedKey
-  -- to VerificationKey PaymentKey before getting the hash.
-  let vkeyExtended = getVerificationKey skey
-      vkeyPayment  = castVerificationKey vkeyExtended :: VerificationKey PaymentKey
-      pkh          = verificationKeyHash vkeyPayment
-      ownAddr = makeShelleyAddressInEra ShelleyBasedEraConway networkId
-                  (PaymentCredentialByKey pkh)
-                  NoStakeAddress
-                  
-  putStrLn $ "Own address: " ++ show(serialiseAddress ownAddr)
-
-  -- Local connection
-  let conn = LocalNodeConnectInfo
-               { localConsensusModeParams = CardanoModeParams (EpochSlots 21600)
-               , localNodeNetworkId       = networkId
-               , localNodeSocketPath      = File socketPath
-               }
-
-  -- Query PParams (current way in Conway)
-  eResult <- runExceptT $ queryNodeLocalState conn VolatileTip
-                        (QueryInEra (QueryInShelleyBasedEra ShelleyBasedEraConway QueryProtocolParameters))
-
-  pparams <- case eResult of
-               Left acquiringErr -> error $ "Failed to acquire connection to the node: " ++ show acquiringErr
-               Right (Left eraMismatch) -> error $ "Era mismatch in PParams query: " ++ show eraMismatch
-               Right (Right pp) -> return pp  -- pp :: PParams ConwayEra (from ledger, matches your envPParams)
-  let currentEra = AnyCardanoEra ConwayEra
-
-  putStrLn "AppEnv initialized correctly!"
-  putStrLn $ "Network: " ++ show networkId
-  putStrLn $ "Own address: " ++ show(serialiseAddress ownAddr)
-  putStrLn $ "Socket: " ++ socketPath
-
-  return AppEnv
-    { envConn       = conn
-    , envSigningKey = skey
-    , envOwnAddress = ownAddr
-    , envPParams    = pparams
-    , envNetworkId  = networkId
-    , envEra        = currentEra
-    }
 
 
 
 
-ask= getState <|> error ("cardano cloud: no state") :: TransIO AppEnv
+import Control.Concurrent(threadDelay)
+import Control.Exception hiding(onException)
 
--- ===========================================================================
--- Key primitives using the reused connection
--- ===========================================================================
 
--- 6. currentSlot → Directly uses getLocalChainTip with envConn
-currentSlot :: TransIO SlotNo
-currentSlot = do
-  env <- ask
-  tip <- liftIO $ getLocalChainTip (envConn env)
-  return $ case tip of
-    ChainTipAtGenesis -> SlotNo 0
-    ChainTip slotNo _hash _blockNo -> slotNo
+
+
+-- -- 6. currentSlot → Directly uses getLocalChainTip with envConn
+-- currentSlot :: TransIO (ChainTip,SlotNo)
+-- currentSlot = do
+--   env <- ask
+--   tip <- liftIO $ getLocalChainTip (envConn env)
+--   return $ case tip of
+--     ChainTipAtGenesis -> (tip,SlotNo 0)
+--     ChainTip slotNo _hash _blockNo -> (tip,slotNo)
 
 -- 4. waitUntil → Efficient polling using the same connection
 waitUntil :: SlotNo -> Cloud ()
@@ -206,9 +133,62 @@ waitSeconds secs =  do
   onAll $ liftIO $ when (tleft > 0) $ threadDelay tleft
 
 
+
+
+-- data AcquireFailure = AcquireFailure String
+-- -- | Gets all UTxOs from a list of addresses in a single query.
+-- getUTxOsFromWalletAddressesIO :: MonadIO m => AppEnv -> [AddressInEra ConwayEra] -> m (SlotNo,UTxO ConwayEra)
+-- getUTxOsFromWalletAddressesIO env addresses = liftIO $ do
+--   let conn = envConn env
+--       -- Correct form in modern cardano-api for AddressInEra -> AddressAny
+--       toAddrAny (AddressInEra _ addr) = toAddressAny addr 
+
+--       addressSet = Set.fromList $ map toAddrAny addresses
+
+--   ttr ("getUTxOsFromWalletAddressesIO",length addresses, addresses)
+
+--   let utxoFilter = QueryUTxOByAddress addressSet
+--       query = QueryInEra $ QueryInShelleyBasedEra ShelleyBasedEraConway (QueryUTxO utxoFilter)
+
+--   -- currentPoint <- do -- either (error . show) id <$> runExceptT $ queryNodeLocalState conn VolatileTip QueryChainPoint
+--   --     result <-  runExceptT $ queryNodeLocalState conn VolatileTip QueryChainPoint
+--   --     case result of
+--   --        Right (Right c) -> return c
+--   --        Left e -> do error e ; threadDelay 1000000;  getUTxOsFromWalletAddressesIO env addresses
+--   --        e -> error e
+--   currentPoint@(ChainPoint slotNo _) <- chainTipToChainPoint <$> getLocalChainTip (envConn env)
+--   result <- runExceptT $ queryNodeLocalState conn (SpecificPoint currentPoint) query
+--   ttr ("after getUTxOsFromWalletAddressesIO")
+--   case result of
+--     Left eb -> do print eb; getUTxOsFromWalletAddressesIO env addresses
+--     Right (Left e) -> error $ show e
+--     Right (Right utxo) -> do
+--        valid <- isPointValid conn (SpecificPoint currentPoint)
+--        if valid then return (slotNo,utxo) else do print "rollback happened"; threadDelay 1000000; getUTxOsFromWalletAddressesIO env addresses
+
+--   where
+--   -- isPointValid :: AppEnv -> ChainPoint -> IO Bool
+--   isPointValid conn point = do
+
+--     -- We try to make a minimal query (like requesting the current Slot) 
+--     -- pointing specifically to that ChainPoint.
+--     -- If the point has suffered a rollback, 'queryNodeLocalState' will fail 
+--     -- before executing the internal query.
+--     result <- runExceptT $ queryNodeLocalState conn point QueryChainPoint
+
+--     case result of
+--       -- If the node accepts the point, it is still in the main chain
+--       Right _ -> return True
+
+--       -- If there is a "PointNotFound" error or similar, the point is invalid
+--       Left err -> do
+--         putStrLn $ "Invalid point detected (possible rollback): " ++ show err
+--         return False
+
+--------------------------------------------------------------------------------------
 -- 5. getUTxOsAt → Uses queryNodeLocalState with the existing connection
-getUTxOsAtIO :: AppEnv -> AddressInEra ConwayEra -> IO (UTxO ConwayEra)
-getUTxOsAtIO env addr = do
+getUTxOsAtIO :: MonadIO m => AppEnv -> AddressInEra ConwayEra -> m (UTxO ConwayEra)
+getUTxOsAtIO env addr = liftIO $ do
   ttr "getUTxOsAtIO"
   let conn = envConn env
       addrAny = case deserialiseAddress AsAddressAny (serialiseAddress addr) of
@@ -219,169 +199,14 @@ getUTxOsAtIO env addr = do
                      (QueryUTxO (QueryUTxOByAddress (Set.singleton addrAny)))
 
   result <- liftIO $ runExceptT  $ queryNodeLocalState conn VolatileTip  query
-  ttr ("after getUTxOsAtIO")
+  ttr "after getUTxOsAtIO"
   case result of
     Left acquireFail -> error $ "Acquire failed: " ++ show acquireFail
     Right (Left e)   -> error $ "Acquire failed: " ++ show e
     Right (Right utxo)       -> return utxo
 
 
-buildAndBalanceTxEstimateIO env bodyContent = do
-  let conn       = envConn env
-      ownAddr    = envOwnAddress env
-      rawPParams = envPParams env  -- PParams (ShelleyLedgerEra ConwayEra)
-  
-  utxo <- getUTxOsAtIO env ownAddr
-  ttr("Available UTXOs: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
-
-  let shelleyBasedEra = ShelleyBasedEraConway
-      maryEraOnwards = MaryEraOnwardsConway
-
-      stakePools :: Set.Set PoolId
-      stakePools = Set.empty
-
-      depositReturns :: Map.Map StakeCredential Coin
-      depositReturns = Map.empty
-
-      -- drepReturns :: Map.Map DRepCredential Coin
-      drepReturns = Map.empty
-
-      exUnitsMap :: Map.Map ScriptWitnessIndex ExecutionUnits
-      exUnitsMap = Map.empty
-
-      initialFee :: Coin
-      initialFee = Coin 0
-
-      keyWits :: Int
-      keyWits = 1
-
-      scriptWits :: Int
-      scriptWits = 0
-
-      refSize :: Int
-      refSize = 0
-
-      selectedTxIns = Map.keys (unUTxO utxo)
-
-      totalInputValue :: Value
-      totalInputValue = foldMap go (Map.elems $ unUTxO utxo)
-        where
-          go (TxOut _addr txOutVal _datum _refScript) = txOutValueToValue txOutVal
-
-
-
-      bodyContent' = bodyContent { txIns = txIns bodyContent ++ map (\txin -> (txin, BuildTxWith (KeyWitness KeyWitnessForSpending))) selectedTxIns }
-
-  ttr "autobalance"
-  let balancedEither = estimateBalancedTxBody
-                      maryEraOnwards
-                      bodyContent'
-                      rawPParams
-                      stakePools
-                      depositReturns
-                      drepReturns
-                      exUnitsMap
-                      initialFee
-                      keyWits
-                      scriptWits
-                      refSize
-                      ownAddr
-                      totalInputValue
-
-  either (\err -> error $ "Error balancing tx: " ++ show err)
-         return
-         (do r <-balancedEither; ttr "after autobalance"; return r)
-
--- | balancing using makeTransactionBodyAutoBalance
-buildAndBalanceTxAutoIO :: AppEnv -> TxBodyContent BuildTx ConwayEra -> IO (BalancedTxBody ConwayEra)
-buildAndBalanceTxAutoIO env bodyContent = do
-  let conn       = envConn env
-      ownAddr    = envOwnAddress env
-      rawPParams = envPParams env  -- PParams (ShelleyLedgerEra ConwayEra)
-
-  utxo <- getUTxOsAtIO env ownAddr
-  ttr("Available UTXOs: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
-  systemStart <- runExceptT (queryNodeLocalState conn VolatileTip QuerySystemStart)
-                 >>= either (error . show) return
-
-  eraHistory <- runExceptT (queryNodeLocalState conn VolatileTip QueryEraHistory)
-                >>= either (error . show) return
-  ttr "after era history"
-  let shelleyBasedEra = ShelleyBasedEraConway 
-  
-      epochInfo = toLedgerEpochInfo eraHistory
-
-      ledgerPParams = LedgerProtocolParameters rawPParams
-
-      stakePools :: Set.Set PoolId
-      stakePools = Set.empty
-
-      depositReturns :: Map.Map StakeCredential Coin
-      depositReturns = Map.empty
-
-      -- Parameter for DRep deposit returns (empty if you don't unregister DReps) 
-      drepReturns :: Map.Map (Credential 'DRepRole) Coin
-      drepReturns = Map.empty
-  ttr "autobalance"
-  let autoBalance = makeTransactionBodyAutoBalance
-                      shelleyBasedEra
-                      systemStart
-                      epochInfo
-                      ledgerPParams
-                      stakePools
-                      depositReturns
-                      drepReturns 
-                      utxo
-                      bodyContent
-      
-      balancedEither = do r <- autoBalance ownAddr Nothing;   ttr ("after autobalance"); return r
-  
-   
-  either (\err -> error $ "Error balancing tx: " ++ show err)
-         return
-         balancedEither
-
-
-
-
--- | Signs a balanced transaction (BalancedTxBody) using the environment's signing key.
---   It extracts the actual TxBody from the BalancedTxBody to be able to sign it.
-signTxServerIO :: MonadIO m => AppEnv -> BalancedTxBody ConwayEra -> m (Tx ConwayEra)
-signTxServerIO env balancedTxBody = do
-  let skey = envSigningKey env  -- Assuming PaymentSigningKey or similar
-
-  -- Extract the actual balanced TxBody (this is the one to be signed)
-  let body = case balancedTxBody of
-               BalancedTxBody _content txBody _change _fee -> txBody
-               -- Or if your version uses different field names, adjust the pattern match
-
-  -- Create the key witness using the function you already have and that compiles
-  let shelleyEra = ShelleyBasedEraConway
-
-      witness :: KeyWitness ConwayEra
-      witness = makeShelleyKeyWitness shelleyEra body (WitnessPaymentExtendedKey skey)
-        -- Or WitnessPaymentKey skey if it's not an extended key
-  return $ makeSignedTransaction [witness] body
-  -- Build the signed Tx
-
-getWitnessServer :: AppEnv -> BalancedTxBody ConwayEra ->  KeyWitness ConwayEra
-getWitnessServer env bbody= 
-  let skey = envSigningKey env  -- Assuming PaymentSigningKey or similar
-
-  -- Extract the real balanced TxBody (this is the one to be signed)
-      body = case bbody of
-               BalancedTxBody _content txBody _change _fee -> txBody
-               -- Or if your version uses different field names, adjust the pattern match
-
-  -- Create the key witness using the function you already have that compiles
-
-      
-  in makeShelleyKeyWitness ShelleyBasedEraConway body (WitnessPaymentExtendedKey skey)
-        -- Or WitnessPaymentKey skey if it is not extended
-
-
-
-data UnsignedTx = UnsignedTx
+newtype UnsignedTx = UnsignedTx
   { cborHex :: T.Text
   } deriving (Show, Generic, ToJSON, FromJSON)
 
@@ -389,19 +214,10 @@ data UnsignedTx = UnsignedTx
 newtype CBORData a= CBORData a deriving (Read, Show)
 
 
--- instance {-# OVERLAPPABLE #-}  (Read a, Show a, Typeable a,SerialiseAsCBOR a) => Loggable  a where
---    serialize  c   = byteString $  serialiseToCBOR c  `BS.snoc`   (0xFF :: Word8)
---    deserialize = r where
---      r = do
---       either <-  deserialiseFromCBOR (asType :: AsType  a)  <$> BS.toStrict <$> tTakeWhile' (/= '\xFF') 
---       case either of
---             Left err -> error $ "Error deserializing  " ++ show (typeOf (undefined :: a)) ++ "" ++show err
---             Right x -> return  x
-
 instance Loggable (KeyWitness ConwayEra)
 
 -- instance Show (KeyWitness ConwayEra)
-instance Read ((KeyWitness ConwayEra)) where
+instance Read (KeyWitness ConwayEra) where
    readsPrec _ _= error "read not implemented"
 
 
@@ -410,56 +226,61 @@ deriving instance  Typeable (KeyWitness ConwayEra)
 instance Loggable TxId where
   serialize txId= byteString $ serialiseToRawBytes  txId `BS.snoc` 0xFF
   deserialize= do
-    mt <- deserialiseFromRawBytesHex  <$> BS.toStrict <$> tTakeWhile' (/= '\xFF')
+    mt <- deserialiseFromRawBytesHex . BS.toStrict <$> tTakeWhile' (/= '\xFF')
     case mt of
       Right tid -> return tid
       Left err ->  do
         s <- giveParseString
-        error $ "Error deserializing  " ++ show (typeOf (undefined :: TxId)) ++ " error: " <> show err
+        error $ "Error deserializing  " ++ show (typeRep (Proxy :: Proxy TxId)) ++ " error: " <> show err
+
+
+
+
+
+
+
+
+
 
 -- | signs with the private key envSingningKey
 signSend :: Map.Map TxIn (TxOut CtxUTxO ConwayEra)
          -> BalancedTxBody ConwayEra
-         -> Cloud ( TxId)
-signSend  utxos balanced = local $ do
-  localNodeInfo <- envConn <$> getState <|> error "err"
-  env <- getState <|> error "signSend: env state not found"
-  let network = localNodeNetworkId localNodeInfo
-      alladdrs :: [AddressInEra ConwayEra] = getAllRequiredSignerAddresses  network utxos balanced 
-      (myaddr  ,addrs ) = partition (== envOwnAddress env) alladdrs
-  
-  let (BalancedTxBody _txContent txBody _change _fee)  = balanced 
+         -> Cloud TxId
+signSend utxos balanced = local $ do
+  env <- ask
+  let localNodeInfo = envConn env
+      network = localNodeNetworkId localNodeInfo
+      addrs :: [AddressInEra ConwayEra] = nub . sort $ getAllRequiredSignerAddresses  network utxos balanced
+      -- (myaddr  ,addrs ) = partition (== envOwnAddress env) alladdrs
+
+  let (BalancedTxBody _txContent txBody _change _fee)  = balanced
       unsignedTx = makeSignedTransaction [] txBody
       cborBytes = serialiseToCBOR unsignedTx   -- we serialize the balancedTxBody directly
       cborHex = TE.decodeUtf8 $ B16.encode cborBytes
 
-  let signserver = getWitnessServer env balanced
+  -- let signserver = getWitnessServer env balanced
 
-  ttr "sign browser"
-  -- unCloud $ publishn (map (T.unpack . serialiseAddress) addrs) $ minput "sign" ("Please press here to receive and sign the transaction" :: String) :: TransIO ()
+  ttr ("sign browser",length addrs)
 
-  witnesss <- unCloud $ collectc (length addrs) timeout $ do
-    
-    POSTData witnessesHex <- publishn (map (T.unpack . serialiseAddress) addrs) $ minput "signIt" $ UnsignedTx { cborHex = cborHex }
-    ttr "after sign"
+  witnesss <-  unCloud $ collectc (length addrs) timeout $ do
+    POSTData (witnessCbor :: T.Text) <- publishn (map (T.unpack . serialiseAddress) addrs) $  minput "signIt" $ UnsignedTx { cborHex = cborHex }
+    ttr ("after sign",witnessCbor)
 
-    -- 3. We deserialize the witness received from the browser (the wallet already signed it)
-    let witnessBytes = case B16.decode $ TE.encodeUtf8 witnessesHex of
-            Left err   -> error $ "Invalid hex in witnesses: " ++ err
-            Right bytes -> bytes
+    moutput ("Thanks for signing" :: String)
+    return witnessCbor
 
-          -- witness :: KeyWitness ConwayEra
-          -- witness =
-    return $ case deserialiseFromCBOR (asType :: AsType (KeyWitness ConwayEra)) witnessBytes of
-              Left err -> error $ "Error deserializing witness: " ++ show err
-              Right ws -> ws
+  
+  let signed = case buildMultiSignedTx txBody  witnesss of
+                    Left err     -> error $ show ("buildMultiSignedTx error", err)
+                    Right signed -> signed
 
-  -- witnesss <- unCloud signAll
 
-  -- 4. We add the user's witnesses to the body (same as on server-side)
-  signed <- return $ makeSignedTransaction (signserver : witnesss) txBody
   submitSignedTx signed
-  where 
+
+
+  where
+
+
   -- | Returns the addresses that must sign the transaction (payment key addresses only).
   --   Requires the UTxO map used to build the tx (to resolve TxIn -> AddressInEra). 
   -- | Returns the addresses that must sign the transaction (inputs with KeyWitness + extra required signers).
@@ -474,7 +295,7 @@ signSend  utxos balanced = local $ do
       fromInputs = mapMaybe getAddrFromInput (txIns bodyContent)
 
       getAddrFromInput :: (TxIn, BuildTxWith BuildTx (Witness WitCtxTxIn ConwayEra))
-                      -> Maybe (AddressInEra ConwayEra) 
+                      -> Maybe (AddressInEra ConwayEra)
       getAddrFromInput (txin, BuildTxWith (KeyWitness _)) =   -- ← patrón correcto aquí
         case Map.lookup txin utxoMap of
           Just (TxOut addr _ _ _) -> Just addr
@@ -484,13 +305,8 @@ signSend  utxos balanced = local $ do
 
       -- Extra required signers (if you have them in your tx)
       fromExtra = mempty
-        -- case txExtraKeyWits bodyContent of
-        --   TxExtraKeyWitnesses _supported hashes ->
-        --     [ let addrShelley = makeShelleyAddress network (PaymentCredentialByKey pkh) NoStakeAddress
-        --       in case addrShelley of addr -> AddressInEra ConwayEra addr
-        --     | pkh <- hashes
-        --     ]
-          -- _ -> []
+
+
 
 
 
@@ -508,40 +324,40 @@ submitSignedTx signedTx = do
   -- Submit using the correct TxInMode wrapper for Conway
   ttr "submit"
 
-  -- onBack $ \case
-  --   -- Mempool congestion (very frequent)
-  --   SubmitTxErrorInMode _ (SubmitTxValidationError (MempoolFull _)) ->
-  --     do loggedmsg "Mempool full - retrying submit"
-  --        threadDelay 2000000  -- 2 seconds
-  --        retryTransaction   -- → retry local (re-submit mismo signedTx)
+  -- We wrap the \case in () to avoid GHC-77182 error
+  onBack1 $ \e@(TxValidationErrorInCardanoMode _) -> do
+      let errStr = map toLower $ show e
+      if "mempoolfull" `isInfixOf` errStr then do
+          loggedmsg "Mempool full - retrying"
+          liftIO $ threadDelay 2000000
+          retryTransaction
+      else if "nodebusy" `isInfixOf` errStr then do
+            loggedmsg "Node busy - retrying"
+            liftIO $ threadDelay 1000000
+            retryTransaction
+      else backtrack
 
-  --   -- Other transient errors (e.g., node temporarily busy)
-  --   SubmitTxErrorInMode _ (SubmitTxValidationError (NodeBusy _)) ->
-  --     do loggedmsg "Node busy - retrying submit"
-  --        threadDelay 1000000
-  --        retryTransaction
-
-  -- use queryUtxoByTxIn to verify utxos?
-
-  result <- submitTxToNodeLocal
-              conn 
+  result <- submitTxToNodeLocal  -- <|> rollbackhandling
+              conn
               (TxInMode (shelleyBasedEra :: ShelleyBasedEra ConwayEra) signedTx)
   ttr "after submit"
   case result of
-    SubmitSuccess -> return $ getTxId (getTxBody signedTx)
-    SubmitFail e{- @(TxValidationErrorInCardanoMode  innerErr)-} -> back e 
+    SubmitSuccess -> do
+        let txId = getTxId (getTxBody signedTx)
+        liftIO $ trackTx txId
+        return txId
+    SubmitFail e@(TxValidationErrorInCardanoMode  _) ->  back e -- initiates the backtracking for transaction errors
 
 
 -- | Autobalance a transaction
-buildAndBalanceTxIO :: MonadIO m => AppEnv -> UTxO ConwayEra ->TxBodyContent BuildTx ConwayEra -> m (BalancedTxBody ConwayEra)
-buildAndBalanceTxIO env utxo bodyContent = liftIO $ do
+-- buildAndBalanceTxIO :: MonadIO m => AppEnv -> AddressInEra ConwayEra -> UTxO ConwayEra ->TxBodyContent BuildTx ConwayEra -> m (BalancedTxBody ConwayEra)
+
+buildAndBalanceTxIO env ownAddr utxo bodyContent = liftIO $ do
   let conn       = envConn env
-      ownAddr    = envOwnAddress env
+      -- ownAddr    = envOwnAddress env
       rawPParams = envPParams env
 
-  -- when the bug in balance is fixed:
-  -- utxo <- getUTxOsAtIO env ownAddr 
-  -- ttr("UTXOs disponibles: " , Map.size $ unUTxO utxo,"details", Map.toList $ unUTxO utxo)
+
   systemStart <- runExceptT (queryNodeLocalState conn VolatileTip QuerySystemStart)
                  >>= either (error . show) return
 
@@ -553,7 +369,7 @@ buildAndBalanceTxIO env utxo bodyContent = liftIO $ do
       epochInfo = toLedgerEpochInfo eraHistory
       ledgerPParams = LedgerProtocolParameters rawPParams
       stakePools = Set.empty
-      depositReturns = Map.empty 
+      depositReturns = Map.empty
       -- CORRECTION: We use the correct map types expected by the API, 
       -- specifying the concrete type for `drepReturns`.
       drepReturns :: Map.Map (Credential 'DRepRole) Coin
@@ -568,61 +384,67 @@ buildAndBalanceTxIO env utxo bodyContent = liftIO $ do
                       stakePools
                       depositReturns
                       drepReturns
-                      
+
                       utxo
                       bodyContent
 
       balancedEither = do r <- autoBalance ownAddr Nothing; ttr "after autobalance"; return r
-  ttr ("ownAddr:",envOwnAddress env)
+  -- ttr ("ownAddr:",envOwnAddress env)
   ttr ("complete bodyContent", bodyContent)  -- Check for hidden extras
-  ttr ("ownAddr serialized: ", case envOwnAddress env of
-            AddressInEra _ addr -> serialiseAddress $ toAddressAny addr)
 
 
 
-  either (\err -> error $ "Error balancing tx: " ++ show err) return balancedEither
+
+
+  -- either (\err -> error $ "Error balancing tx: " ++ show err) 
+  return balancedEither
 
 
 
 timeout= 2*60*60*1000000
 
 -- | pay ADA from the account defined in the application
-pay ::   AddressInEra ConwayEra -> Lovelace -> Cloud  TxId
-pay  targetAddr amount =  local $ do
-  env <- getState <|> error "error"
-  ownAddress <- head <$> listPayAddresses <$> userAddress <$> getState <|> error "error"
+payOne ::   AddressInEra ConwayEra -> Lovelace -> Cloud  TxId
+payOne  targetAddr amount =  local $ do
+  ttr "PAYONE"
+  watchRawAddress targetAddr
+  env <- getState <|> error "pay: no App state"
+  userEnv <- getState <|> error "pay: no user env"
+  let ownAddresses  = listPayAddresses $ userAddress userEnv
+      stakeAddresses = listStakeAddresses $ userAddress userEnv
+      changeAddr = fromMaybe (head ownAddresses) (changeAddress $ userAddress userEnv)
 
-  -- rebalance in these submitTx errors. (To refine)
-  -- onBack $ \case
-  --   SubmitTxApplyTxErr (ApplyTxErr (UtxoFailure (BadInputsUTxO _))) ->
-  --           retryTransaction   -- double spend → re-balanceo completo
+  payBactracks
 
-  --   SubmitTxValidationError (CollateralNotSufficient _ _) ->
-  --           retryTransaction   -- collateral → re-balanceo + añadir collateral
 
-  --   SubmitTxValidationError (InsufficientFunds _ _) ->
-  --           retryTransaction   -- fondos → re-balanceo con más inputs
+  ttr ("Query all UTXOs at owner's address", length ownAddresses,ownAddresses)
 
-  --   SubmitTxValidationError (FeeTooSmall _ _) ->
-  --           retryTransaction   -- fee → re-balanceo (recalcula fees)
+  -- (slotNo,utxo) <- getUTxOsFromWalletAddressesIO env ownAddresses
+  cachelist <- liftIO $ getUtxosFor  $ head stakeAddresses
+  let utxo= toCardanoUtxo cachelist
+      utxoList = Map.toList $ unUTxO utxo
 
-  --   SubmitTxValidationError (TxValidityTooEarly _) ->
-  --           retryTransaction   -- slot → actualizar slot y re-balancear
+  -- 3. The list of tuples (what you use for foldM, coin selectors, etc.)
+  -- The type is: [(Api.TxIn, Api.TxOut Api.CtxUTxO Api.ConwayEra)]
 
-  -- Query all UTXOs at owner's address
-  output ("examining your utxos" :: String)
-  utxo <- liftIO $ getUTxOsAtIO env ownAddress
-  let utxoList = Map.toList (unUTxO utxo)
-  
   -- Check if there are any UTXOs
-  when (null utxoList) $ 
-    error "payIO: No UTXOs available at owner address"
-  
+  when (null utxoList) $  output ("payIO: No UTXOs available at owner address" ::String) >> empty
+
+
   -- Convert all UTXOs to txIns with KeyWitnessForSpending
-  let txInsList = map (\(txIn, _) -> (txIn, BuildTxWith (KeyWitness KeyWitnessForSpending))) utxoList
-  
+  let txInsList = map (\(utxoId, _) -> (utxoId, BuildTxWith (KeyWitness KeyWitnessForSpending))) utxoList
+
+  -- Calculate TTL (Current Slot + 900 slots/15 minutes)
+  tip <- liftIO $ getLocalChainTip (envConn env)
+  let currentSlotNo = case tip of
+        ChainTipAtGenesis -> SlotNo 0
+        ChainTip s _ _ -> s
+      ttlSlot = currentSlotNo + 900
+      upperBound = TxValidityUpperBound ShelleyBasedEraConway (Just ttlSlot)
+
   -- the balanced, unsigned transaction body should be logged since a multisign can last for a long time
-  body <- buildAndBalanceTxIO env utxo $
+  -- makeTransactionBodyAutoSelection 
+  ebody <- buildAndBalanceTxIO env changeAddr utxo $
                 let shelleyBasedEra = ShelleyBasedEraConway
                     bodyContent = defaultTxBodyContent shelleyBasedEra
                 in bodyContent
@@ -638,268 +460,142 @@ pay  targetAddr amount =  local $ do
                   , txVotingProcedures = Nothing
                   , txCertificates = TxCertificatesNone
                   , txWithdrawals = TxWithdrawalsNone
+                  , txValidityLowerBound = TxValidityNoLowerBound
+                  , txValidityUpperBound = upperBound
                   }
+  body <- case ebody of
+    Left (TxBodyErrorMinUTxONotMet _ _) -> do output ("minimun amount not met, please retry" :: String) ; empty
+    Right b -> return b
+    err -> do output  $ show err ; empty
+
+  unCloud job
+  output ("Please sign the transaction" :: String)
+  
   unCloud $ signSend  (toCtxTxOuts utxo) body
+  where
+  payBactracks= onBack1 $ \case
+      e@(TxValidationErrorInCardanoMode _) -> do
+          let errStr = map toLower $ show e
+
+          -- 1. Double spend (BadInputsUTxO)
+          if "badinputstuxo" `isInfixOf` errStr then do
+              loggedmsg "Double spend detected - completely re-balancing"
+              retryTransaction
+
+          -- 2. Collateral (CollateralNotSufficient)
+          else if "collateralnotsufficient" `isInfixOf` errStr then do
+              loggedmsg "Insufficient collateral - adding collateral and re-balancing"
+              retryTransaction
+
+          -- 3. Insufficient funds (ValueNotConserved or InsufficientFunds)
+          else if "valuenotconserved" `isInfixOf` errStr || "insufficientfunds" `isInfixOf` errStr then do
+              loggedmsg "Insufficient funds - re-balancing with more inputs"
+              retryTransaction
+
+          -- 4. Fees (FeeTooSmall)
+          else if "feetoosmall" `isInfixOf` errStr then do
+              loggedmsg "Insufficient fee - recalculating fees"
+              retryTransaction
+
+          -- 5. Slot (ValidityInterval / TooEarly / Expired)
+          else if "validityinterval" `isInfixOf` errStr || "TooEarly" `isInfixOf` errStr then do
+              loggedmsg "Slot out of range - updating slot and re-balancing"
+              retryTransaction
+
+          else do
+            loggedmsg $ "Unhandled error detected in JSON: " ++ errStr
+            back e
+
+      other -> back other
+
+
+-- | Era-agnostic conversion from MiUTxO to Cardano API UTxO.
+toCardanoUtxo :: forall era. (IsCardanoEra era) => [MiUTxO] -> UTxO era
+toCardanoUtxo cacheList =
+    UTxO $ Map.fromList [ (uId, convertToTxOut mi) | mi <- cacheList, let uId = utxoId mi ]
+  where
+    convertToTxOut :: MiUTxO -> TxOut CtxUTxO era
+    convertToTxOut mi =
+      let
+        addrInEra = case anyAddressInEra (cardanoEra @era) (addr mi) of
+          Right a -> a
+          Left err -> error $ "Address conversion failed: " ++ err
+
+        txOutVal = case cardanoEra @era of
+          ByronEra   -> TxOutValueByron (selectLovelace (value mi))
+          -- Shelley and Allegra: We use the Quantity conversion to get the numeric value
+          ShelleyEra -> TxOutValueShelleyBased ShelleyBasedEraShelley (toShelleyLovelace (selectLovelace (value mi)))
+          AllegraEra -> TxOutValueShelleyBased ShelleyBasedEraAllegra (toShelleyLovelace (selectLovelace (value mi)))
+          -- Mary onwards
+          MaryEra    -> TxOutValueShelleyBased ShelleyBasedEraMary    (toLedgerValue MaryEraOnwardsMary (value mi))
+          AlonzoEra  -> TxOutValueShelleyBased ShelleyBasedEraAlonzo  (toLedgerValue MaryEraOnwardsAlonzo (value mi))
+          BabbageEra -> TxOutValueShelleyBased ShelleyBasedEraBabbage (toLedgerValue MaryEraOnwardsBabbage (value mi))
+          ConwayEra  -> TxOutValueShelleyBased ShelleyBasedEraConway  (toLedgerValue MaryEraOnwardsConway (value mi))
+      in
+      TxOut
+        addrInEra
+        txOutVal
+        (convertDatum (datum mi) (datumHash mi))
+        (convertRefScript (refScript mi))
+
+    -- | Converts Lovelace to Coin using the Quantity representation.
+    -- In v10.19, Lovelace is usually an alias of Quantity or has an instance of it.
+    toShelleyLovelace :: Lovelace -> Cardano.Ledger.Coin.Coin
+    toShelleyLovelace l =
+      let Quantity q = lovelaceToQuantity l
+      in fromIntegral q
+
+    -- Witness helpers
+    getBabbageWitness = case cardanoEra @era of
+      BabbageEra -> Just BabbageEraOnwardsBabbage
+      ConwayEra  -> Just BabbageEraOnwardsConway
+      _          -> Nothing
+
+    getAlonzoWitness = case cardanoEra @era of
+      AlonzoEra  -> Just AlonzoEraOnwardsAlonzo
+      BabbageEra -> Just AlonzoEraOnwardsBabbage
+      ConwayEra  -> Just AlonzoEraOnwardsConway
+      _          -> Nothing
+
+    convertDatum mDat mHash = case (mDat, mHash) of
+      (Just d, _) -> case getBabbageWitness of
+                        Just w  -> TxOutDatumInline w d
+                        Nothing -> TxOutDatumNone
+      (_, Just h) -> case getAlonzoWitness of
+                        Just w  -> TxOutDatumHash w h
+                        Nothing -> TxOutDatumNone
+      _           -> TxOutDatumNone
+
+    convertRefScript (Just s) = case getBabbageWitness of
+                                  Just w  -> ReferenceScript w s
+                                  Nothing -> ReferenceScriptNone
+    convertRefScript Nothing  = ReferenceScriptNone
 
 
 -- 1. lock: Locks funds in a script with inline datum
-lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud  TxId
-lock   scriptAddr amount datum = local $ do
-  env <- getState <|> error "error"
-  utxos <- liftIO $ getUTxOsAtIO env (envOwnAddress env)
-  body  <- liftIO $ buildAndBalanceTxIO  env utxos $
-          let 
-            shelleyBasedEra = ShelleyBasedEraConway
-            era = BabbageEraOnwardsConway
-            content= defaultTxBodyContent shelleyBasedEra 
-          in content
-            { txOuts =
-                [ TxOut
-                      scriptAddr (lovelaceToTxOutValue shelleyBasedEra amount)
-                      (TxOutDatumInline era (unsafeHashableScriptData datum)) ReferenceScriptNone
-                ]
-            -- CORRECTION: For the Conway era, it must be explicitly specified that there are no proposals.
-            , txProposalProcedures = Just (Featured ConwayEraOnwardsConway TxProposalProceduresNone)
-            }
-  unCloud $ signSend  (toCtxTxOuts utxos) body
+-- lock :: AddressInEra ConwayEra -> Lovelace -> ScriptData -> Cloud  TxId
+-- lock   scriptAddr amount datum = local $ do
+--   env <- getState <|> error "error"
+--   utxos <- liftIO $ getUTxOsAtIO env (envOwnAddress env)
+--   body  <- liftIO $ buildAndBalanceTxIO  env (error "lock: fix this") utxos $
+--           let 
+--             shelleyBasedEra = ShelleyBasedEraConway
+--             era = BabbageEraOnwardsConway
+--             content= defaultTxBodyContent shelleyBasedEra 
+--           in content
+--             { txOuts =
+--                 [ TxOut
+--                       scriptAddr (lovelaceToTxOutValue shelleyBasedEra amount)
+--                       (TxOutDatumInline era (unsafeHashableScriptData datum)) ReferenceScriptNone
+--                 ]
+--             -- CORRECTION: For the Conway era, it must be explicitly specified that there are no proposals.
+--             , txProposalProcedures = Just (Featured ConwayEraOnwardsConway TxProposalProceduresNone)
+--             }
+--   unCloud $ signSend  (toCtxTxOuts utxos) body
 
 
 toCtxTxOuts (UTxO utxoMap) = utxoMap
 
-data UserAddress = UserAddress{listPayAddresses :: [AddressInEra ConwayEra],changeAddress :: Maybe(AddressInEra ConwayEra)
-                              ,listStakeAddresses :: [StakeCredential]}  deriving (Generic,Default,Typeable)
 
-
-  
--- 1) HEX -> AddressInEra ConwayEra
-fromHexToConwayAddress
-  :: BS.ByteString
-  -> AddressInEra ConwayEra
-fromHexToConwayAddress hex =
-  case deserialiseFromRawBytesHex hex of
-    Right addr ->  addr
-    Left  left -> error $ show left
-
-
--- 2) AddressInEra ConwayEra -> HEX
-toHexFromConwayAddress
-  :: AddressInEra ConwayEra
-  -> BS.ByteString
-toHexFromConwayAddress =
-  serialiseToRawBytesHex
-
-
-
-fromHexToStakeCredential :: BS.ByteString -> StakeCredential
-fromHexToStakeCredential =
-  go . either (error "invalid hex") id . B16.decode
- where
-  go bs = case BS.uncons bs of
-    -- stake key hash
-    Just (0xe1, h) ->
-      let kh = either (error . show) id
-                 (deserialiseFromRawBytes (AsHash AsStakeKey) h)
-      in StakeCredentialByKey kh
-
-    -- script hash (lo dejas como ya lo tenías)
-    Just (0xe0, h) ->
-      let sh = either (error . show) id (deserialiseFromRawBytes AsScriptHash h)
-      in StakeCredentialByScript sh
- 
-    _ -> error "invalid stake credential"
-
-
-
-    -- script hash (prefijo 0xe0 + 28 bytes hash)
-    Just (0xe0, h) ->
-      let sh = either (error . show) id (deserialiseFromRawBytes AsScriptHash h)
-      in StakeCredentialByScript sh
-
-    _ -> error "invalid stake credential" 
-
-
-toHexFromStakeCredential :: StakeCredential -> BS.ByteString
-toHexFromStakeCredential (StakeCredentialByKey kh) =
-  B16.encode $ BS.cons 0xe1 (serialiseToRawBytes kh)
-toHexFromStakeCredential (StakeCredentialByScript sh) =
-  B16.encode $ BS.cons 0xe0 (serialiseToRawBytes sh)
-
-instance ToJSON UserAddress where
-  toJSON ua = object
-    [ "listPayAddresses"   .= fmap (bsToText . toHexFromConwayAddress) (listPayAddresses ua)
-    , "changeAddress"      .= fmap (bsToText . toHexFromConwayAddress) (changeAddress ua)
-    , "listStakeAddresses" .= fmap (bsToText . toHexFromStakeCredential) (listStakeAddresses ua)
-    ]
-    where
-      bsToText = TE.decodeUtf8
-
-instance FromJSON UserAddress where
-  parseJSON = withObject "UserAddress" $ \o ->
-    UserAddress
-      <$> fmap (map parseAddr) (o .:  "listPayAddresses")
-      <*> fmap (fmap parseAddr) (o .:? "changeAddress")
-      <*> fmap (map parseStake) (o .:  "listStakeAddresses")
-    where
-      parseAddr  = fromHexToConwayAddress . TE.encodeUtf8
-      parseStake = fromHexToStakeCredential . TE.encodeUtf8
-
-
-
--- deriving instance Generic StakeCredential                          
--- -- deriving instance FromJSON StakeCredential
-
--- instance FromJSON StakeCredential where
---   parseJSON = withText "StakeCredential" $ \txt ->
---     let bsHex = TE.encodeUtf8 txt
---     in case B16.decode bsHex of
---          Right bs -> 
---            case deserialiseFromRawBytesHex bs of
---              Right h -> pure (StakeCredentialByKey h)
---              Left e  -> fail ("Invalid StakeCredential hash: " <> show e)
---          Left e -> fail ("StakeCredential hex mal formado: " <> e)
-
-instance Default StakeCredential where 
-  def = StakeCredentialByKey dummyHash
-    where
-      dummyHash =
-        case B16.decode "1c3a7b0d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d" of
-          Right bs ->
-            case deserialiseFromRawBytes (AsHash AsStakeKey) bs of
-              Right h  -> h
-              Left err -> error $ show err
-          Left e -> error ("malformed hex: " <> e)
-
-
-
-instance Default (AddressInEra ConwayEra) where
-  def =
-    makeShelleyAddressInEra
-      (shelleyBasedEra @ConwayEra) -- era
-      Mainnet                      -- network
-      (PaymentCredentialByKey dummyHash) -- dummy payment
-      NoStakeAddress
-    where
-      dummyHash =
-        case deserialiseFromRawBytesHex
-               "0000000000000000000000000000000000000000000000000000000000000000" of
-          Right h -> h
-          Left e  -> error ("invalid dummy hash: " )
-
-
-
-
-instance Loggable UserAddress where
-  serialize= serializeToJSON
-  deserialize=deserializeJSON
-
--- instance Default UserAddress where
---   def=  UserAddress{payAddresses=["$address1","$address2"] ,changeAddresses =["$changeaddres"] ,stakeAddresses=".."}
--- instance Generic UserAddress
-
-
-data UserEnv = UserEnv{userAddress :: UserAddress }
-
--- | the account address is initiated and a endpoint to receive all the endpoint available
-userInit :: Cloud ()
-userInit = userInit' 
-
-userInit'= do
-  local abduce
-  POSTData useraddr' <- minput "addrs" ("Enter your wallet addresses" :: String)
-  useraddr <- if (null $ listPayAddresses useraddr') 
-    then
-      if changeAddress useraddr'== Nothing 
-        then do
-            moutput ("No payment addresses provided, please retry" :: String)
-            empty 
-        else
-          return useraddr'{listPayAddresses= [fromJust $ changeAddress useraddr']}
-    else return useraddr'
-
-  setState UserEnv{userAddress= useraddr}
-  onAllNodes $ do
-    c <- liftIO $ BSS.pack <$> replicateM 5 (randomRIO ('a', 'z')) 
-    setCookie "session" c  
-    -- setSession $ BSS.toStrict c
-  loggedmsg $ "Wallet registered with " ++ show (length $ listPayAddresses useraddr) ++ " payment addresses"
-  -- publish the endpoint that returns all available endpoints at any moment
-  --  note that <|> return () continues the execution for the initialization thread
-  -- publishn ["allendpts"] (minput "allendpoints" ("see all the endpoints available for you" :: String) :: Cloud())
-  allp <|> allPublishedEndpoints
-  -- minput "next" ("next" ::String) :: Cloud ()
-  
-
-loggedmsg= local . return 
-
--- | send all the endpoints for a user. This may vary according with the user state and what other users publish
-allp= do
- publish "General" $ minput "allendpts" ("All endpoints for you" :: String) :: Cloud()
- allPublishedEndpoints
- empty
-
-allPublishedEndpoints = local $ do
-    UserEnv{userAddress= UserAddress{listPayAddresses=addr:_}} <- getState
-
-    output ( str "General") 
-    ttr "after General" 
-    published "general" 
-    -- output (str "For you") 
-    -- ttr "after For you"
-    -- published (show addr)
-    -- output (str "pending") 
-    -- published ("pending" <> show addr)
-
-str s= s :: String
-
-
--- main= runCC 
---   "/ipc/node.socket"  
---   (Testnet (NetworkMagic 2)) 
---   "./cardano-cloud/tests/payment.skey"  
---   empty
 deriving instance Read NetworkMagic
 deriving instance Read NetworkId
-   
-runCC :: Cloud () -> IO ()
-runCC  cl=  void $ keep $ initNode $ inputNodes <|> do
-    local $ do
-      liftIO $ do
-        hSetEncoding stdout utf8
-        hSetEncoding stderr utf8
-        hSetEncoding stdin  utf8   
-   
-    -- let socketPath = "/ipc/node.socket"
-    --     networkId = Testnet (NetworkMagic 2)
-    --     skeyPath = "./cardano-cloud/tests/payment.skey"
-    -- -------------------
-      (socketPath, networkId, skeyPath) <- cardanoParams
-      ttr (socketPath, networkId, skeyPath)
-      liftIO $ putStrLn "Initalizing Cardano Cloud environment"
-      -- 1. Initialize the environment only once.
-      env <- liftIO $ initAppEnv socketPath networkId skeyPath
-      setState env
-
-    runJobs
-    minput "init" ("init" :: String) :: Cloud ()
-
-    userInit
-    ttr "after userInit"
-    cl
-    where
-    cardanoParams= do
-      option "cardanoparams"  "Enter the Cardano params" :: TransIO String
-      socketPath <- do
-        input (const True) "Enter the socket path > "
-
-      liftIO $ putStrLn $ "Choose the network:"
-      networkId <- do
-        (n :: String) <- input (const True) "Network id? >"
-        case map Data.Char.toLower n of 
-          "mainnet" -> return $ Mainnet
-          "preprod" -> return $ Testnet(NetworkMagic 1)
-          "preview" -> return $ Testnet(NetworkMagic 2)
-
-      
-      skeyPath <- input (const True) "Enter the path of your key file > " 
-      
-      return (socketPath, networkId, skeyPath)
